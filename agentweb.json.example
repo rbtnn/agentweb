@@ -1,0 +1,19 @@
+{
+  "port": 8000,
+  "llmApiUrl": "https://api.openai.com/v1/chat/completions",
+  "llmApiKey": "YOUR_API_KEY",
+  "model": "gpt-4o-mini",
+  "allowTools": true,
+  "maxToolsPerTurn": 16,
+  "toolTimeoutSec": 30,
+  "contextWindow": 64000,
+  "reserveTokens": 12000,
+  "keepRecentTokens": 20000,
+  "useSystemProxy": true,
+  "proxyUrl": "",
+  "proxyUser": "",
+  "proxyPass": "",
+  "systemPrompt": "",
+  "bindPath": "",
+  "openBrowserOnStart": true
+}

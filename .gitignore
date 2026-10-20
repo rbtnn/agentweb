@@ -1,0 +1,17 @@
+# ビルド成果物
+aw.exe
+*.exe
+output/
+
+# 秘密情報・ローカル設定（コミット禁止）
+.env
+*.local.bat
+run.local.bat
+
+# その他
+.DS_Store
+Thumbs.db
+
+# 実際の設定(個人情報)とログ
+agentweb.json
+agentweb.log
