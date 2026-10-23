@@ -30,10 +30,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-#if TRAY
-using System.Windows.Forms;
-using System.Drawing;
-#endif
 
 namespace AgentWeb
 {
@@ -45,14 +41,13 @@ namespace AgentWeb
         {
             string configPath = "";
             int port = -1;
-            bool help = false, forceConsole = false;
+            bool help = false;
 
             for (int i = 0; i < args.Length; i++)
             {
                 string a = (args[i] ?? "").Trim();
                 if (a == "--config" && i + 1 < args.Length) configPath = args[++i].Trim();
                 else if (a.StartsWith("--config=")) configPath = a.Substring("--config=".Length);
-                else if (a == "--console") forceConsole = true;
                 else if (a == "--help" || a == "-h" || a == "/?") help = true;
                 else if (a.StartsWith("--port=")) int.TryParse(a.Substring("--port=".Length), out port);
                 else { int p; if (int.TryParse(a.TrimStart(':'), out p)) port = p; }
@@ -66,14 +61,6 @@ namespace AgentWeb
 
             _server = new HttpServer(port, cfg);
 
-#if TRAY
-            if (!forceConsole && IsWindows())
-            {
-                SetupLogFile(cfg);
-                RunTray(port, cfg);
-                return;
-            }
-#endif
             RunConsole(port, cfg);
         }
 
@@ -83,13 +70,6 @@ namespace AgentWeb
             Console.WriteLine("使用法: aw.exe [オプション]");
             Console.WriteLine("  --config <path>   設定ファイル(agentweb.json)のパス");
             Console.WriteLine("  --port <n>        ポート番号 (既定 8000)");
-            Console.WriteLine("  --console         コンソールを表示(デバッグ用)");
-        }
-
-        static bool IsWindows()
-        {
-            try { return Environment.OSVersion.Platform == PlatformID.Win32NT; }
-            catch { return false; }
         }
 
         static void RunConsole(int port, Config cfg)
@@ -101,87 +81,23 @@ namespace AgentWeb
             Console.WriteLine("  Model  : " + cfg.Model);
             Console.WriteLine("  Config : " + cfg.ConfigPath);
             Console.WriteLine("  Stop   : Ctrl+C");
-            try { _server.Run(); }
-            catch (Exception ex) { Console.WriteLine("FATAL: " + ex.Message); }
-        }
 
-#if TRAY
-        static void SetupLogFile(Config cfg)
-        {
-            try
-            {
-                string logPath = Path.Combine(AppDirStatic(), "agentweb.log");
-                StreamWriter w = new StreamWriter(logPath, true, Encoding.UTF8);
-                w.AutoFlush = true;
-                Console.SetOut(w);
-                Console.SetError(w);
-            }
-            catch { }
-        }
-
-        static string AppDirStatic()
-        {
-            try { return AppDomain.CurrentDomain.BaseDirectory; } catch { return "."; }
-        }
-
-        static void RunTray(int port, Config cfg)
-        {
-            Exception srvErr = null;
             Thread t = new Thread(delegate()
             {
                 try { _server.Run(); }
-                catch (Exception ex) { srvErr = ex; }
+                catch (Exception ex) { Console.WriteLine("FATAL: " + ex.Message); }
             });
-            t.IsBackground = true;
+            t.IsBackground = false;
             t.Start();
 
-            NotifyIcon ni = new NotifyIcon();
-            ni.Icon = SystemIcons.Application;
-            ni.Text = "agentweb (localhost:" + port + ")";
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("ブラウザで開く", null, delegate { try { Process.Start("http://localhost:" + port + "/"); } catch { } });
-            menu.Items.Add("設定ファイルを開く", null, delegate { try { Process.Start("notepad.exe", "\"" + FindConfigPath(cfg) + "\""); } catch { } });
-            menu.Items.Add("設定を再読み込み", null, delegate { ReloadConfig(cfg, port); });
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("終了", null, delegate { try { ni.Visible = false; _server.Stop(); } catch { } Application.Exit(); });
-            ni.ContextMenuStrip = menu;
-            ni.DoubleClick += delegate { try { Process.Start("http://localhost:" + port + "/"); } catch { } };
-            ni.Visible = true;
-
-            try { if (cfg.OpenBrowserOnStart) Process.Start("http://localhost:" + port + "/"); } catch { }
-
-            Application.Run();
-
-            try { ni.Visible = false; ni.Dispose(); } catch { }
-            try { _server.Stop(); } catch { }
-        }
-
-        static string FindConfigPath(Config cfg)
-        {
-            if (cfg.ConfigPath != null && cfg.ConfigPath.Length > 0) return cfg.ConfigPath;
-            return Path.Combine(AppDirStatic(), "agentweb.json");
-        }
-
-        static void ReloadConfig(Config cfg, int port)
-        {
-            string msg;
-            try
+            if (cfg.OpenBrowserOnStart)
             {
-                cfg.Reload();
-                msg = "設定を再読み込みしました。";
-                if (cfg.ConfigPath != null && cfg.ConfigPath.Length > 0)
-                    msg += "\nファイル: " + cfg.ConfigPath;
-                if (cfg.Port != port)
-                    msg += "\n※ ポート番号の変更は再起動が必要です(それ以外は即時反映)。";
+                try { Thread.Sleep(400); Process.Start("http://localhost:" + port + "/"); }
+                catch { }
             }
-            catch (Exception ex)
-            {
-                msg = "設定の再読み込みに失敗しました:\n" + ex.Message;
-            }
-            try { MessageBox.Show(msg, "agentweb", MessageBoxButtons.OK, MessageBoxIcon.Information); }
-            catch { }
+
+            t.Join();
         }
-#endif
     }
 
     // ------------------------------------------------------------------------

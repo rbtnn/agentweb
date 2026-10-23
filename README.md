@@ -5,7 +5,7 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 
 - 組込み HTTP サーバ（`http://localhost:8000/`）+ Web UI
 - OpenAI 互換 LLM API 連携 + ツール実行（shell / read_file / write_file / list_dir / curl）
-- **タスクトレイ常駐・コンソール非表示**（winexe）、スタートアップ登録も可能
+- **コンソールアプリ**として常駐起動（`aw.exe` を実行するだけ）、スタートアップ登録も可能
 - セッション管理（AppData 永続化・サイドバー）と pi 方式のコンパクション
 - 社内プロキシ対応 / ダーク・ライトテーマ / Mermaid 描画
 
@@ -17,7 +17,8 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 | `index.html` | Web UI の元ソース（`embed_ui.py` で `.cs` に埋め込み） |
 | `embed_ui.py` | `index.html` を base64 化して `AgentWeb.cs` に埋め込む |
 | `agentweb.json.example` | 設定ファイルのサンプル（実際の設定は `agentweb.json` にコピー） |
-| `build.bat` | `csc.exe` で `aw.exe` をビルド（CP932/CRLF） |
+| `build.bat` | `csc.exe` で **コンソール版** `aw.exe` をビルド（CP932/CRLF） |
+| `run.bat` | ビルド済み `aw.exe`（コンソール版）を起動する補助スクリプト |
 | `README.md` | 本ドキュメント |
 
 > `build.bat` は **DOS(CRLF) + CP932(Shift-JIS)**、`AgentWeb.cs` は **UTF-8(BOM付き)** です。
@@ -28,14 +29,16 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
   （`HttpListener` を使わないため **管理者権限 / `netsh urlacl` / IIS 不要**）
 - **LLM API クライアント** … `System.Net.HttpWebRequest`
 - **JSON** … 自前実装（追加アセンブリ不使用）
-- **タスクトレイ** … `System.Windows.Forms`（.NET Framework 同梱アセンブリ。ビルド時参照のみ）
+
+> 追加アセンブリ参照は**一切なし**（BCL のみ）。したがって `System.Windows.Forms` 等は使いません。
 
 ## ビルド手順（Windows / csc.exe）
 
 ```bat
 cd agentweb
 build.bat
-:: （csc は自動検索。GUI/winexe + タスクトレイ版 aw.exe を生成）
+:: （csc は自動検索。コンソール版 aw.exe を生成）
+:: 生成後は aw.exe（または run.bat）で起動します
 ```
 
 ## 設定（agentweb.json）
@@ -87,18 +90,18 @@ build.bat
 > 互換性：既存の環境変数（`LLM_API_KEY` 等）も引き続き既定値として使えますが、
 > `agentweb.json` が優先されます。
 
-## 実行・タスクトレイ
+## 実行（コンソール）
 
-- `aw.exe` は **GUI（winexe）** で、起動すると**コンソールは出さずタスクトレイに常駐**します。
-  - トレイアイコンを **ダブルクリック** → ブラウザで `http://localhost:<port>/` を開く
-  - **右クリックメニュー** →「ブラウザで開く」「設定ファイルを開く」「終了」
-- ログは exe と同じフォルダの **`agentweb.log`** に出力されます。
-- デバッグ時はコンソール表示できます： `aw.exe --console`
-- その他オプション： `aw.exe --port 8080` / `--config <path>` / `--help`
+- `aw.exe` は **コンソールアプリ**です。実行するとコンソールに起動情報を表示し、
+  `http://localhost:<port>/` で待ち受けます。
+- 画面には接続先（URL）、使用モデル、設定ファイルのパスが表示されます。
+- **`Ctrl+C`** で停止できます。
+- `openBrowserOnStart`（既定 `true`）の場合、起動時に既定のブラウザで UI を開きます。
+- オプション： `aw.exe --port 8080` / `--config <path>` / `--help`
 
 ### スタートアップ（自動起動）登録
-タスクトレイ常駐なので、Windows の**スタートアップフォルダ**に `aw.exe` へのショートカットを
-置く（またはレジストリの `Run` に登録）だけで、ログオン時に自動起動できます。
+Windows の**スタートアップフォルダ**に `aw.exe` へのショートカットを置くだけで、
+ログオン時に自動起動できます（コンソールウィンドウが表示されます）。
 
 ## HTTP エンドポイント
 
@@ -167,7 +170,7 @@ Web UI のサイドバーで切替・新規作成・リネーム・削除がで�
 
 ## C# 5 / .NET 4.5 対応メモ
 - `$` 文字列補間・`?.`・`nameof` 等の新しい構文は不使用（C# 5 に完全準拠）
-- 通常は GUI 指向で `Console` 出力不要。`aw.exe --console` 時のみ表示
+- コンソールアプリのため、起動情報・エラーは `Console`（標準出力）に表示されます
 
 
 ## 開発・コミット名義
