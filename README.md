@@ -13,16 +13,15 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 
 | ファイル | 役割 |
 |---|---|
-| `AgentWeb.cs` | 本体（単一ソース）。HTTP サーバ + LLM クライアント + JSON エンジン。**Web UI を base64 で内包** |
-| `index.html` | Web UI の元ソース（`embed_ui.py` で `.cs` に埋め込み） |
-| `embed_ui.py` | `index.html` を base64 化して `AgentWeb.cs` に埋め込む |
+| `AgentWeb.cs` | 本体（単一ソース）。HTTP サーバ + LLM クライアント + JSON エンジン |
+| `index.html` | Web UI（外部ファイル。`GET /` で直接配信。編集後は再ビルド不要） |
 | `agentweb.json.example` | 設定ファイルのサンプル（実際の設定は `agentweb.json` にコピー） |
 | `build.bat` | `csc.exe` で **コンソール版** `aw.exe` をビルド（CP932/CRLF） |
 | `run.bat` | ビルド済み `aw.exe`（コンソール版）を起動する補助スクリプト |
 | `README.md` | 本ドキュメント |
 
 > `build.bat` は **DOS(CRLF) + CP932(Shift-JIS)**、`AgentWeb.cs` は **UTF-8(BOM付き)** です。
-> csc が日本語文字列を正しく読めるよう BOM を付けています。
+> `index.html` は **`aw.exe` と同じフォルダ**に置いてください（`bindPath` で変更可能）。
 
 ### 外部依存ゼロの内訳
 - **HTTP サーバ** … `System.Net.Sockets.TcpListener` による独自実装
@@ -158,9 +157,8 @@ Web UI のサイドバーで切替・新規作成・リネーム・削除がで�
 - LLM へは `[システム + 要約] + 最近メッセージ` を送る。**完全履歴はディスクに残る**（lossless）
 
 ## Web UI を編集する場合
-1. `index.html` を編集
-2. `python embed_ui.py` を実行（base64 化して `AgentWeb.cs` に埋め込み、UTF-8 BOM を維持）
-3. `build.bat` で再ビルド
+`index.html` を編集するだけで反映されます（サーバはリクエストごとに `index.html` を読み込むため、再ビルド不要）。
+ブラウザを再読み込みしてください。
 
 ## 公開運用の注意（公開リポジトリ向け）
 - **API キー・社内 URL・サーバ情報をリポジトリへコミットしない**こと。
