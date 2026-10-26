@@ -1301,7 +1301,8 @@ namespace AgentWeb
                                 name = ToolExecutor.InferName(fn, argsJson);
                             if (fn != null && name != null && name.Trim().Length > 0) fn["name"] = name;
 
-                            AgentProgress.Add("ツール実行: " + (name.Length > 0 ? name : "?"));
+                            string ndetail = ToolDetail(name, argsJson);
+                            AgentProgress.Add("ツール実行: " + (name.Length > 0 ? name : "?") + (ndetail.Length > 0 ? ("  " + ndetail) : ""));
                             Console.WriteLine("[agent] tool_call[" + k + "] id=" + id + " name=" + name);
                             Console.WriteLine("[agent]   args=" + (argsJson.Length > 400 ? argsJson.Substring(0, 400) : argsJson));
 
@@ -1542,6 +1543,37 @@ namespace AgentWeb
         static string Escape(string s)
         {
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
+
+        static string ArgStr(Dictionary<string, object> a, string k)
+        {
+            if (a != null && a.ContainsKey(k)) return Json.AsString(a[k]);
+            return "";
+        }
+
+        // ツール引数から表示用の詳細(ファイル名/フルコマンド/URL等)を作る
+        static string ToolDetail(string name, string argsJson)
+        {
+            if (argsJson == null || argsJson.Length == 0) return "";
+            Dictionary<string, object> a = null;
+            try { a = Json.Parse(argsJson) as Dictionary<string, object>; }
+            catch { }
+            if (a == null) return "";
+
+            string cmd = ArgStr(a, "cmd");
+            string path = ArgStr(a, "path");
+            string pattern = ArgStr(a, "pattern");
+            string url = ArgStr(a, "url");
+            string method = ArgStr(a, "method");
+
+            if (name == "shell") return cmd;
+            if (name == "read_file" || name == "write_file" || name == "list_dir")
+                return pattern.Length > 0 ? (path + "  [" + pattern + "]") : path;
+            if (name == "curl") return (method.Length > 0 ? (method + " ") : "") + url;
+            if (cmd.Length > 0) return cmd;
+            if (path.Length > 0) return path;
+            if (url.Length > 0) return url;
+            return "";
         }
 
         // ---- 単発 API 呼び出し ----
@@ -1883,8 +1915,9 @@ namespace AgentWeb
                             }
                             if (name.Length == 0 && fn != null) name = ToolExecutor.InferName(fn, argsJson);
                             if (fn != null && name.Length > 0) fn["name"] = name;
-                            AgentProgress.Add("ツール実行: " + name);
-                            if (emit != null) emit("tool", "{ \"name\" : \"" + Escape(name) + "\" }");
+                            string tdetail = ToolDetail(name, argsJson);
+                            AgentProgress.Add("ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
+                            if (emit != null) emit("tool", "{ \"name\" : \"" + Escape(name) + "\", \"detail\" : \"" + Escape(tdetail) + "\" }");
                             string result;
                             try { result = ToolExecutor.Execute(name, argsJson, cfg); }
                             catch (Exception ex) { result = "{\"error\": \"" + Escape(ex.Message) + "\"}"; }

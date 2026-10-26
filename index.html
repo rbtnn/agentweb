@@ -274,7 +274,13 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .typing span:nth-child(2) { animation-delay: .2s; }
   .typing span:nth-child(3) { animation-delay: .4s; }
   .progress { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
-  .pstep { font-size: 11px; color: var(--accent); }
+  .pstep { font-size: 11px; color: var(--accent); word-break: break-all; }
+  .pdetail {
+    font-size: 11px; color: var(--muted);
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+    white-space: pre-wrap; word-break: break-all;
+    padding-left: 12px;
+  }
   /* 思考(thinking)表示 */
   .think { margin: 0 0 8px; border-left: 2px solid var(--border); padding: 2px 8px; }
   .think > summary {
@@ -967,7 +973,10 @@ function send() {
       }
       else if (ev === "tool" && d) {
         prog.style.display = "block";
-        prog.innerHTML = '<div class="pstep">▶ ツール実行: ' + escapeHtml(String(d.name||"")) + '</div>';
+        var _nm = escapeHtml(String(d.name||""));
+        var _dt = escapeHtml(String(d.detail||""));
+        prog.innerHTML = '<div class="pstep">▶ ツール実行: ' + _nm + '</div>' +
+                         (_dt ? '<div class="pdetail">' + _dt + '</div>' : '');
         scrollBottom();
       }
       else if (ev === "error" && d) {
