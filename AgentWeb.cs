@@ -197,6 +197,7 @@ namespace AgentWeb
                 if (Has(m, "systemPrompt")) SystemPrompt = Json.AsString(Get(m, "systemPrompt"));
                 if (Has(m, "bindPath")) BindPath = Json.AsString(Get(m, "bindPath"));
                 if (Has(m, "openBrowserOnStart")) OpenBrowserOnStart = AsBool(Get(m, "openBrowserOnStart"));
+                if (Has(m, "emitReasoning")) EmitReasoning = AsBool(Get(m, "emitReasoning"));
             }
             catch { }
         }
@@ -1664,7 +1665,8 @@ namespace AgentWeb
         // content: 生成トークンをリアルタイムに contentCb へ配信。
         // tool_calls: ストリーミング断片を組立てて toolCallsOut へ集約。
         static LlmResp CallOnceStream(Config cfg, List<object> messages, bool useTools,
-                                      Action<string> contentCb, List<object> toolCallsOut)
+                                      Action<string> contentCb, Action<string> reasoningCb,
+                                      List<object> toolCallsOut)
         {
             ServicePointManager.SecurityProtocol =
                 SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
@@ -1741,6 +1743,12 @@ namespace AgentWeb
                                 if (contentCb != null) contentCb(t);
                             }
                         }
+                        if (cfg.EmitReasoning)
+                        {
+                            string rt = DeltaText(delta, "reasoning_content");
+                            if (rt.Length == 0) rt = DeltaText(delta, "reasoning");
+                            if (rt.Length > 0 && reasoningCb != null) reasoningCb(rt);
+                        }
                         if (delta.ContainsKey("tool_calls") && delta["tool_calls"] is List<object>)
                         {
                             List<object> tcs = (List<object>)delta["tool_calls"];
@@ -1800,6 +1808,16 @@ namespace AgentWeb
             return r;
         }
 
+        // delta から文字列フィールドを取り出す(文字列以外・欠落は空文字)
+        static string DeltaText(Dictionary<string, object> delta, string key)
+        {
+            if (delta == null || !delta.ContainsKey(key)) return "";
+            object v = delta[key];
+            if (v == null) return "";
+            if (v is string) return (string)v;
+            return "";
+        }
+
         class StreamToolAcc
         {
             public string Id = "";
@@ -1808,7 +1826,7 @@ namespace AgentWeb
         }
 
         // ストリーミング付きエージェント実行。emit(イベント名, dataJSON) で SSE を配信。
-        // イベント: content(応答トークン) / tool(ツール実行) / toolend / done(完了)
+        // イベント: content(応答トークン) / reasoning(思考トークン) / tool(ツール実行) / toolend / done(完了)
         public static void RunAgentStream(Config cfg, SessionCtx ctx, string userMessage,
                                           Action<string, string> emit, Action<SessionCtx> save)
         {
@@ -1835,6 +1853,10 @@ namespace AgentWeb
                         delegate (string d)
                         {
                             if (emit != null) emit("content", "{ \"t\" : \"" + Escape(d) + "\" }");
+                        },
+                        delegate (string d)
+                        {
+                            if (emit != null) emit("reasoning", "{ \"t\" : \"" + Escape(d) + "\" }");
                         },
                         toolCallsOut);
                     if (resp.TotalTokens > 0) ctx.LastTotalTokens = resp.TotalTokens;

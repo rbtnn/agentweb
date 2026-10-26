@@ -275,6 +275,19 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .typing span:nth-child(3) { animation-delay: .4s; }
   .progress { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
   .pstep { font-size: 11px; color: var(--accent); }
+  /* 思考(thinking)表示 */
+  .think { margin: 0 0 8px; border-left: 2px solid var(--border); padding: 2px 8px; }
+  .think > summary {
+    cursor: pointer; font-size: 11px; color: var(--muted);
+    list-style: none; user-select: none; outline: none;
+  }
+  .think > summary::-webkit-details-marker { display: none; }
+  .think > summary:hover { color: var(--text); }
+  .think-body {
+    font-size: 11px; line-height: 1.5; color: var(--muted);
+    white-space: pre-wrap; word-wrap: break-word;
+    margin-top: 4px; max-height: 240px; overflow-y: auto;
+  }
   @keyframes blink { 0%,80%,100% { opacity:.25 } 40% { opacity:1 } }
 
   /* error */
@@ -907,6 +920,22 @@ function send() {
   prog.style.display = "none";
   bubbleEl.appendChild(prog);
 
+  // 思考(thinking)ブロック: reasoning トークンが来たら生成
+  var thinkEl = null, thinkBody = null, thinkText = "";
+  function ensureThink() {
+    if (thinkEl) return;
+    thinkEl = document.createElement("details");
+    thinkEl.className = "think";
+    thinkEl.open = true;
+    var sum = document.createElement("summary");
+    sum.textContent = "思考";
+    thinkBody = document.createElement("div");
+    thinkBody.className = "think-body";
+    thinkEl.appendChild(sum);
+    thinkEl.appendChild(thinkBody);
+    bubbleEl.insertBefore(thinkEl, mdEl);
+  }
+
   var fullText = "";
   var lastPaint = 0;
   function paint(force) {
@@ -930,6 +959,12 @@ function send() {
     function handle(ev, dat) {
       var d = null; try { d = JSON.parse(dat); } catch(e){}
       if (ev === "content" && d) { fullText += (d.t || ""); paint(false); }
+      else if (ev === "reasoning" && d) {
+        ensureThink();
+        thinkText += (d.t || "");
+        thinkBody.textContent = thinkText;
+        scrollBottom();
+      }
       else if (ev === "tool" && d) {
         prog.style.display = "block";
         prog.innerHTML = '<div class="pstep">▶ ツール実行: ' + escapeHtml(String(d.name||"")) + '</div>';
@@ -939,6 +974,7 @@ function send() {
         bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ ' + escapeHtml(String(d.message||"エラー")) + '</div></div>';
       }
       else if (ev === "done" && d) {
+        if (thinkEl) thinkEl.open = false;   // 完了時に思考を折りたたむ
         if (d.session) { sessionId = d.session; localStorage.setItem("aiagent.session", sessionId); }
         refreshSessions();
       }

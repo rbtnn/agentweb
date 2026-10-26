@@ -52,6 +52,7 @@ build.bat
   "llmApiKey": "YOUR_API_KEY",
   "model": "gpt-4o-mini",
   "allowTools": true,
+  "emitReasoning": true,
   "maxToolsPerTurn": 16,
   "toolTimeoutSec": 30,
   "contextWindow": 64000,
@@ -74,6 +75,7 @@ build.bat
 | `llmApiKey` | （空） | 必須。OpenAI 互換 API のキー |
 | `model` | `gpt-4o-mini` | モデル名 |
 | `allowTools` | `true` | ツール実行許可 |
+| `emitReasoning` | `true` | モデルの思考(`reasoning_content`/`reasoning`)を UI に表示するか |
 | `maxToolsPerTurn` | `16` | 1 ターンの同時ツール呼び出し上限 |
 | `toolTimeoutSec` | `30` | シェル実行タイムアウト（秒）・curl タイムアウト |
 | `contextWindow` | `64000` | コンテキスト上限（推定トークン） |

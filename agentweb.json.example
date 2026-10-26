@@ -4,6 +4,7 @@
   "llmApiKey": "YOUR_API_KEY",
   "model": "gpt-4o-mini",
   "allowTools": true,
+  "emitReasoning": true,
   "maxToolsPerTurn": 16,
   "toolTimeoutSec": 30,
   "contextWindow": 64000,
