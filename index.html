@@ -436,6 +436,13 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   button.send:disabled { opacity: .45; cursor: not-allowed; }
   button.send:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
   :root[data-theme="light"] button.send { color: #ffffff; }
+  /* 生成中(停止ボタン)は Pi Web と同じ赤 */
+  button.send.stop {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #ffffff;
+  }
+  button.send.stop:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; }
   button.ghost {
     border: 1px solid var(--border);
     background: var(--bg);
@@ -1122,10 +1129,12 @@ function createSession(silent) {
 var sendBtnHTML = sendBtn.innerHTML; // 元の送信アイコン
 function setSendAsStop(b) {
   if (b) {
+    sendBtn.classList.add("stop");     // 停止中は赤色 (Pi Web と同じ)
     sendBtn.innerHTML = "■";
     sendBtn.style.fontSize = "18px";
     sendBtn.title = "処理を中止";
   } else {
+    sendBtn.classList.remove("stop");
     sendBtn.innerHTML = sendBtnHTML;
     sendBtn.style.fontSize = "";
     sendBtn.title = "送信";

@@ -17,7 +17,6 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 |---|---|
 | `AgentWeb.cs` | 本体（単一ソース）。HTTP サーバ + LLM クライアント + JSON エンジン |
 | `index.html` | Web UI（外部ファイル。`GET /` で直接配信。編集後は再ビルド不要） |
-| `agentweb.json.example` | 設定ファイルのサンプル（実際の設定は `agentweb.json` にコピー） |
 | `build.bat` | `csc.exe` で **コンソール版** `aw.exe` をビルド（CP932/CRLF） |
 | `run.bat` | ビルド済み `aw.exe`（コンソール版）を起動する補助スクリプト |
 | `check_consistency.py` | `AgentWeb.cs`（サーバ）と `index.html`（UI）の整合性チェック |
@@ -58,7 +57,7 @@ build.bat
 - 旧配置（`aw.exe` と同じフォルダ）のファイルは、**新しい場所にファイルが無い場合のみ**読み込まれます。
 - **Web 画面の `⚙ settings` から編集・保存できます**（保存後は即時反映。ポート変更のみ再起動が必要）。
 
-`agentweb.json.example` は設定項目のサンプルです。
+設定項目は次のとおりです（`⚙ settings` からも同じ項目を編集できます）。
 
 ```json
 {
@@ -255,8 +254,8 @@ Web UI のサイドバーで切替・新規作成・リネーム・削除がで�
 
 ## 公開運用の注意（公開リポジトリ向け）
 - **API キー・社内 URL・サーバ情報をリポジトリへコミットしない**こと。
-  実際の接続先・キーは **`.gitignore` 済みの `agentweb.json`** に置いてください
-  （`agentweb.json.example` はプレースホルダのまま公開）。
+  実際の接続先・キーは **`.gitignore` 済みの `agentweb.json`**
+  （`%APPDATA%\agentweb\agentweb.json`）に置いてください。
 - `shell` などのツール実行を含むため、公開時は利用者本人専用である旨を明記ください。
 
 ## C# 5 / .NET 4.5 対応メモ
