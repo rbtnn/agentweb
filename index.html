@@ -753,6 +753,7 @@ function renderSessionList(sessions, selected) {
     var cnt = (s.count || 0);
     var item = document.createElement("div");
     item.className = "session-item" + (s.id === selected ? " active" : "");
+    item.setAttribute("data-id", s.id);
     item.title = s.title || "会話";
     item.addEventListener("click", function(){ selectSession(s.id); });
 
@@ -877,7 +878,20 @@ function selectSession(id) {
   if (!id || busy) return;
   sessionId = id;
   localStorage.setItem("aiagent.session", id);
+  updateActiveItem();   // 一覧の active を即時更新(再描画しない)
   fetchSession(id);
+}
+
+// 現在の sessionId に合わせて一覧の active クラスを付け替える
+function updateActiveItem() {
+  if (!sessionListEl) return;
+  var items = sessionListEl.querySelectorAll(".session-item");
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var id = it.getAttribute("data-id") || "";
+    if (id === sessionId) it.classList.add("active");
+    else it.classList.remove("active");
+  }
 }
 
 function refreshSessions() {
