@@ -811,11 +811,11 @@ function startRename(id, currentTitle, item, txt) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: v })
-    }).catch(function(){}).then(function(){ refreshSessions(); });
+    }).catch(function(){}).then(function(){ refreshSessionList(); });
   };
   input.addEventListener("keydown", function(e){
     if (e.key === "Enter") { e.preventDefault(); commit(); }
-    else if (e.key === "Escape") { refreshSessions(); }
+    else if (e.key === "Escape") { refreshSessionList(); }
   });
   input.addEventListener("blur", commit);
 }
@@ -828,7 +828,7 @@ function autoTitle(id, btn) {
   fetch("/api/sessions/" + encodeURIComponent(id) + "/autotitle", { method: "POST" })
     .then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
-      if (d && d.ok) { refreshSessions(); }
+      if (d && d.ok) { refreshSessionList(); }
       else { alert("名前の自動設定に失敗しました: " + ((d && (d.message || d.error)) || "不明なエラー")); }
     })
     .catch(function(){ alert("名前の自動設定に失敗しました(通信エラー)"); })
@@ -898,6 +898,23 @@ function refreshSessions() {
       fetchSession(target);
     })
     .catch(function(){ emptyChat(); });
+}
+
+// サイドバーの一覧だけを更新する（会話の再描画はしない＝ツール実行の表示を消さない）
+function refreshSessionList() {
+  fetch("/api/sessions")
+    .then(function(r){ return r.json().catch(function(){ return null; }); })
+    .then(function(d){
+      if (!d || !d.ok) return;
+      var sessions = d.sessions || [];
+      var exists = sessions.some(function(s){ return s.id === sessionId; });
+      if (!exists && sessions.length > 0) {
+        sessionId = sessions[0].id;
+        localStorage.setItem("aiagent.session", sessionId);
+      }
+      renderSessionList(sessions, sessionId);
+    })
+    .catch(function(){});
 }
 
 function createSession(silent) {
@@ -975,7 +992,7 @@ function pollServerBusy() {
           hideTyping();
           connEl.textContent = "connected";
           connEl.style.color = "#4ade80";
-          refreshSessions(); // 完了分を読み込み
+          refreshSessionList(); // 一覧のみ更新(会話の再描画はしない)
         }
       }
     })
@@ -1149,7 +1166,7 @@ function send() {
         stopProgressPoll();
         if (thinkEl) thinkEl.open = false;   // 完了時に思考を折りたたむ
         if (d.session) { sessionId = d.session; localStorage.setItem("aiagent.session", sessionId); }
-        refreshSessions();
+        refreshSessionList();   // 会話は再描画しない(ツール実行の表示を残す)
       }
     }
 
@@ -1176,10 +1193,10 @@ function send() {
     .catch(function(err){
       stopProgressPoll();
       bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ 通信エラー: ' + escapeHtml(String(err)) + '</div></div>';
-      refreshSessions();
+      refreshSessionList();
       connEl.textContent = "disconnected"; connEl.style.color = "#f87171";
     })
-    .then(function(){ stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessions(); connEl.textContent="connected"; connEl.style.color="#4ade80"; });
+    .then(function(){ stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessionList(); connEl.textContent="connected"; connEl.style.color="#4ade80"; });
 }
 
 /* ---------- events ---------- */
