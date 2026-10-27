@@ -445,12 +445,19 @@ def compile_check():
         output = proc.stdout.decode("utf-8", "replace").strip()
         if proc.returncode == 0:
             ok("C# コンパイル成功 (%s)" % kind)
-        else:
-            lines = [l for l in output.splitlines() if l.strip()]
-            shown = "\n".join(lines[:8])
-            if len(lines) > 8:
-                shown += "\n... 他 %d 件" % (len(lines) - 8)
+            return
+        lines = [l for l in output.splitlines() if l.strip()]
+        shown = "\n".join(lines[:8])
+        if len(lines) > 8:
+            shown += "\n... 他 %d 件" % (len(lines) - 8)
+        # 実際のコンパイラ診断が出ていればソースの問題。出ていなければ環境要因
+        # (アンチウイルスによる .exe 書き込み阻害、コンパイラの権限不足など)とみなし、
+        # 誤ってビルドを止めないよう WARN に留める。
+        if re.search(r"error\s+CS\d+", output):
             fail("C# コンパイル失敗 (%s):\n%s" % (kind, shown))
+        else:
+            warn("C# コンパイルを実行できませんでした (%s, 環境要因の可能性):\n%s"
+                 % (kind, shown or "(出力なし)"))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

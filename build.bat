@@ -51,7 +51,8 @@ if not defined PY (
     )
 )
 if defined PY (
-    !PY! check_consistency.py
+    rem  実際のコンパイルはこの後 csc で行うため、コンパイル検証は省略する
+    !PY! check_consistency.py --no-compile
     if !errorlevel! neq 0 (
         echo [ERROR] AgentWeb.cs と index.html の整合性チェックに失敗しました。
         exit /b 1
