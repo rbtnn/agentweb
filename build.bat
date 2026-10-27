@@ -35,6 +35,18 @@ if not defined CSC (
     exit /b 1
 )
 
+rem --- AgentWeb.cs と index.html の整合性チェック (Python があれば) ---
+where python >nul 2>nul
+if %errorlevel% equ 0 (
+    python check_consistency.py
+    if !errorlevel! neq 0 (
+        echo [ERROR] AgentWeb.cs と index.html の整合性チェックに失敗しました。
+        exit /b 1
+    )
+) else (
+    echo [WARN] python が見つからないため整合性チェックをスキップします。
+)
+
 echo [0/1] Using csc: %CSC%
 echo [1/1] Compiling AgentWeb.cs (C#5 / .NET 4.5, console/exe) ...
 "%CSC%" /nologo /optimize+ /target:exe /out:aw.exe AgentWeb.cs

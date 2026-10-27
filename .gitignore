@@ -15,3 +15,7 @@ Thumbs.db
 # 実際の設定(個人情報)とログ
 agentweb.json
 agentweb.log
+
+# Python
+__pycache__/
+*.pyc

@@ -18,6 +18,8 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 | `agentweb.json.example` | 設定ファイルのサンプル（実際の設定は `agentweb.json` にコピー） |
 | `build.bat` | `csc.exe` で **コンソール版** `aw.exe` をビルド（CP932/CRLF） |
 | `run.bat` | ビルド済み `aw.exe`（コンソール版）を起動する補助スクリプト |
+| `check_consistency.py` | `AgentWeb.cs`（サーバ）と `index.html`（UI）の整合性チェック |
+| `check.bat` | 上記チェックを実行する補助スクリプト（Windows） |
 | `README.md` | 本ドキュメント |
 
 > `build.bat` は **DOS(CRLF) + CP932(Shift-JIS)**、`AgentWeb.cs` は **UTF-8(BOM付き)** です。
@@ -103,6 +105,31 @@ build.bat
 ### スタートアップ（自動起動）登録
 Windows の**スタートアップフォルダ**に `aw.exe` へのショートカットを置くだけで、
 ログオン時に自動起動できます（コンソールウィンドウが表示されます）。
+
+## 整合性チェック（サーバ／UI）
+
+`AgentWeb.cs`（サーバ）と `index.html`（UI）は別ファイルなので、片方だけ変更すると
+API やイベント名の不一致で不具合になります。`check_consistency.py` が以下を自動検査します。
+
+| 検査 | 内容 |
+|---|---|
+| エンドポイント | UI の `fetch()` パス・メソッドがサーバのルートに存在するか |
+| SSE イベント | サーバが `emit` するイベント名を UI が処理しているか（`toolend` は任意） |
+| SSE フィールド | `content`/`reasoning`/`tool` 等の JSON キーと UI の参照キーが一致するか |
+| `/api/health` | レスポンスのキーを UI が正しく参照しているか |
+| セッション API | 一覧・詳細・作成・自動命名のレスポンスキーが一致するか |
+| `/api/tools` | `allowTools` などのキーが一致するか |
+| 構成 | `index.html` が外部ファイルとして存在し、埋め込み(base64)が残っていないか |
+
+```bat
+python check_consistency.py
+:: または
+check.bat
+```
+
+- 終了コード: `0` = 問題なし（警告のみ）／`1` = 不整合あり
+- `build.bat` は **Python が利用可能なら自動で実行**し、不整合があるとビルドを中止します
+  （Python が無い環境では警告を出してスキップ）。
 
 ## HTTP エンドポイント
 
