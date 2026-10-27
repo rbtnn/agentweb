@@ -1849,7 +1849,15 @@ namespace AgentWeb
             body["temperature"] = 0.7;
             body["stream"] = true;
             if (useTools && cfg.AllowTools)
-                body["tools"] = ToolExecutor.Definitions();
+            {
+                List<object> defs = ToolExecutor.Definitions();
+                body["tools"] = defs;
+                Console.WriteLine("[agent] stream: tools=on defs=" + defs.Count);
+            }
+            else
+            {
+                Console.WriteLine("[agent] stream: tools=off (allowTools=" + cfg.AllowTools + ")");
+            }
 
             string json = Json.ToString(body);
             byte[] payload = Encoding.UTF8.GetBytes(json);
@@ -1876,6 +1884,16 @@ namespace AgentWeb
                 using (HttpWebResponse resp = (HttpWebResponse)request.GetResponse())
                 using (StreamReader sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
+                    bool loggedFirst = false;
+                    string ctype = (resp.ContentType == null) ? "" : resp.ContentType;
+                    if (ctype.IndexOf("event-stream", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        // プロキシ等が stream:true を無視して通常の JSON を返した場合
+                        string bodyText = sr.ReadToEnd();
+                        Console.WriteLine("[agent] stream: 非SSE応答(" + ctype + ") を JSON として解釈");
+                        ParseNonStreamJson(bodyText, finalContent, acc, cfg, contentCb, reasoningCb);
+                    }
+
                     string line;
                     while ((line = sr.ReadLine()) != null)
                     {
@@ -1884,6 +1902,12 @@ namespace AgentWeb
                         if (!line.StartsWith("data:")) continue;
                         string data = line.Substring(5).Trim();
                         if (data == "[DONE]") break;
+                        if (!loggedFirst)
+                        {
+                            loggedFirst = true;
+                            Console.WriteLine("[agent] stream first data: "
+                                + (data.Length > 500 ? data.Substring(0, 500) + "..." : data));
+                        }
                         object parsed;
                         try { parsed = Json.Parse(data); }
                         catch { continue; }
@@ -1893,6 +1917,8 @@ namespace AgentWeb
                         if (choices.Count == 0) continue;
                         Dictionary<string, object> ch = choices[0] as Dictionary<string, object>;
                         if (ch == null || !ch.ContainsKey("delta")) continue;
+                        if (ch.ContainsKey("finish_reason") && ch["finish_reason"] != null)
+                            Console.WriteLine("[agent] finish_reason=" + Json.AsString(ch["finish_reason"]));
                         Dictionary<string, object> delta = ch["delta"] as Dictionary<string, object>;
                         if (delta == null) continue;
 
@@ -1910,6 +1936,15 @@ namespace AgentWeb
                             string rt = DeltaText(delta, "reasoning_content");
                             if (rt.Length == 0) rt = DeltaText(delta, "reasoning");
                             if (rt.Length > 0 && reasoningCb != null) reasoningCb(rt);
+                        }
+                        if (delta.ContainsKey("function_call") && delta["function_call"] is Dictionary<string, object>)
+                        {
+                            Dictionary<string, object> fc = (Dictionary<string, object>)delta["function_call"];
+                            StreamToolAcc cur0;
+                            if (!acc.ContainsKey(0)) { cur0 = new StreamToolAcc(); acc[0] = cur0; }
+                            else cur0 = acc[0];
+                            if (fc.ContainsKey("name") && fc["name"] != null) cur0.Name += Json.AsString(fc["name"]);
+                            if (fc.ContainsKey("arguments") && fc["arguments"] != null) cur0.Args.Append(Json.AsString(fc["arguments"]));
                         }
                         if (delta.ContainsKey("tool_calls") && delta["tool_calls"] is List<object>)
                         {
@@ -1964,6 +1999,10 @@ namespace AgentWeb
                 }
             }
 
+            Console.WriteLine("[agent] stream done: contentLen=" + finalContent.Length
+                + " toolCallFragments=" + acc.Count
+                + " toolCalls=" + (toolCallsOut == null ? 0 : toolCallsOut.Count));
+
             LlmResp r = new LlmResp();
             r.Content = finalContent.ToString();
             r.ToolCalls = (toolCallsOut != null && toolCallsOut.Count > 0) ? toolCallsOut : null;
@@ -1978,6 +2017,86 @@ namespace AgentWeb
             if (v == null) return "";
             if (v is string) return (string)v;
             return "";
+        }
+
+        // 非SSE(通常の JSON)応答を解釈する。stream:true が無視された場合のフォールバック。
+        static void ParseNonStreamJson(string body, StringBuilder contentOut,
+                                       Dictionary<int, StreamToolAcc> acc, Config cfg,
+                                       Action<string> contentCb, Action<string> reasoningCb)
+        {
+            if (body == null || body.Length == 0) return;
+            object o;
+            try { o = Json.Parse(body); }
+            catch (Exception ex) { Console.WriteLine("[agent] JSON解析失敗: " + ex.Message); return; }
+
+            Dictionary<string, object> root = o as Dictionary<string, object>;
+            if (root == null) return;
+            if (!root.ContainsKey("choices") || !(root["choices"] is List<object>))
+            {
+                Console.WriteLine("[agent] choices がありません(エラー応答の可能性)");
+                return;
+            }
+            List<object> choices = (List<object>)root["choices"];
+            if (choices.Count == 0) return;
+            Dictionary<string, object> ch = choices[0] as Dictionary<string, object>;
+            if (ch == null) return;
+
+            if (ch.ContainsKey("finish_reason") && ch["finish_reason"] != null)
+                Console.WriteLine("[agent] finish_reason=" + Json.AsString(ch["finish_reason"]));
+
+            Dictionary<string, object> msg = (ch.ContainsKey("message")) ? (ch["message"] as Dictionary<string, object>) : null;
+            if (msg == null) return;
+
+            string content = msg.ContainsKey("content") ? Json.AsString(msg["content"]) : "";
+            if (content.Length > 0)
+            {
+                contentOut.Append(content);
+                if (contentCb != null) contentCb(content);
+            }
+            if (cfg.EmitReasoning)
+            {
+                string rc = "";
+                if (msg.ContainsKey("reasoning_content")) rc = Json.AsString(msg["reasoning_content"]);
+                else if (msg.ContainsKey("reasoning")) rc = Json.AsString(msg["reasoning"]);
+                if (rc.Length > 0 && reasoningCb != null) reasoningCb(rc);
+            }
+
+            if (msg.ContainsKey("tool_calls") && msg["tool_calls"] is List<object>)
+            {
+                List<object> tcs = (List<object>)msg["tool_calls"];
+                for (int i = 0; i < tcs.Count; i++)
+                {
+                    Dictionary<string, object> tc = tcs[i] as Dictionary<string, object>;
+                    if (tc == null) continue;
+                    StreamToolAcc cur = new StreamToolAcc();
+                    if (tc.ContainsKey("id") && tc["id"] != null) cur.Id = Json.AsString(tc["id"]);
+                    Dictionary<string, object> fn = (tc.ContainsKey("function")) ? (tc["function"] as Dictionary<string, object>) : null;
+                    if (fn != null)
+                    {
+                        if (fn.ContainsKey("name") && fn["name"] != null) cur.Name = Json.AsString(fn["name"]);
+                        if (fn.ContainsKey("arguments"))
+                        {
+                            object av = fn["arguments"];
+                            cur.Args.Append(av is string ? (string)av : Json.ToString(av));
+                        }
+                    }
+                    acc[i] = cur;
+                }
+                Console.WriteLine("[agent] 非SSE: tool_calls=" + tcs.Count);
+            }
+            else if (msg.ContainsKey("function_call") && msg["function_call"] is Dictionary<string, object>)
+            {
+                Dictionary<string, object> fc = (Dictionary<string, object>)msg["function_call"];
+                StreamToolAcc cur = new StreamToolAcc();
+                cur.Name = fc.ContainsKey("name") ? Json.AsString(fc["name"]) : "";
+                if (fc.ContainsKey("arguments"))
+                {
+                    object av = fc["arguments"];
+                    cur.Args.Append(av is string ? (string)av : Json.ToString(av));
+                }
+                acc[0] = cur;
+                Console.WriteLine("[agent] 非SSE: function_call=" + cur.Name);
+            }
         }
 
         class StreamToolAcc
@@ -2022,6 +2141,11 @@ namespace AgentWeb
                         },
                         toolCallsOut);
                     if (resp.TotalTokens > 0) ctx.LastTotalTokens = resp.TotalTokens;
+
+                    bool hasTools = (resp.ToolCalls != null && resp.ToolCalls.Count > 0);
+                    if (!hasTools && (resp.Content == null || resp.Content.Trim().Length == 0))
+                        Console.WriteLine("[agent] 警告: ツール呼び出しも本文も空です"
+                            + "(モデルがツール非対応 / tools 未送信 / API 形式不一致の可能性)");
 
                     if (resp.ToolCalls != null && resp.ToolCalls.Count > 0)
                     {

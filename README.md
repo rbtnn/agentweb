@@ -169,6 +169,22 @@ check.bat
 - 無効化は `allowTools: false`（または実行中の Web UI で「tools」をクリックして on/off）。
 - `shell` にはタイムアウト（`toolTimeoutSec`）と出力長制限を適用しています。
 
+## トラブルシューティング（ツールが実行されない場合）
+
+`aw.exe` はコンソール版なので、実行中のログがそのまま表示されます。ツールが呼ばれない場合は次を確認してください。
+
+| ログ | 意味 / 対処 |
+|---|---|
+| `[agent] stream: tools=off (allowTools=False)` | ツールが無効。`agentweb.json` の `allowTools` を `true` に（UI の `tools` バッジでも切替可） |
+| `[agent] stream: tools=on defs=5` | ツール定義は送信されている（正常） |
+| `[agent] stream first data: {...}` | API の最初の応答。`tool_calls` が含まれるか確認 |
+| `[agent] finish_reason=...` | `tool_calls` ならツール呼び出し、`stop` なら本文のみで終了 |
+| `[agent] stream done: contentLen=... toolCalls=0` | ツール呼び出しが0件（モデルがツール非対応の可能性） |
+| `[agent] 警告: ツール呼び出しも本文も空です` | tools 未送信 / モデル非対応 / API 形式不一致 |
+| `[agent] stream: 非SSE応答(...)` | プロキシが `stream:true` を無視。JSON として解釈して続行 |
+
+> モデルが function calling に対応していない場合、ツールは呼ばれません（本文のみの応答になります）。
+
 ## セッション管理（Windows AppData に永続化）
 
 会話履歴は**セッション単位**で保存され、再起動後も保持されます。
