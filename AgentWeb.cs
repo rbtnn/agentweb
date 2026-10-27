@@ -363,6 +363,8 @@ namespace AgentWeb
                 return HandleHealth();
             if (req.Method == "GET" && path == "/api/tools")
                 return HandleTools();
+            if (req.Method == "GET" && path == "/api/diag/tools")
+                return HandleDiagTools();
             if (req.Method == "POST" && path == "/api/tools")
                 return HandleSetTools(req);
             if (req.Method == "GET" && path == "/api/sessions")
@@ -682,6 +684,13 @@ namespace AgentWeb
                 ? config.ProxyUrl.Trim()
                 : (config.UseSystemProxy ? "system" : "off");
             return JsonResponse(200, d);
+        }
+
+        // ---------------- /api/diag/tools (モデルの function calling 対応確認) ----------------
+        HttpResponse HandleDiagTools()
+        {
+            try { return JsonResponse(200, LlmClient.ProbeTools(config)); }
+            catch (Exception ex) { return JsonResponse(502, MakeError("llm_error", "確認に失敗しました: " + ex.Message)); }
         }
 
         // ---------------- /api/tools ----------------
@@ -1639,6 +1648,38 @@ namespace AgentWeb
             return (r == null) ? "" : r.Content;
         }
 
+        // モデルが function calling に対応しているかを確認する(ツールは実行しない)
+        public static Dictionary<string, object> ProbeTools(Config cfg)
+        {
+            List<object> msgs = new List<object>();
+            msgs.Add(Msg("system",
+                "あなたはツールを利用できるエージェントです。依頼には必ずツールを呼び出して実行してください。"
+                + " 本文だけを返してはいけません。"));
+            msgs.Add(Msg("user", "shell ツールを使って `echo ok` を実行してください。"));
+            LlmResp r = CallOnce(cfg, msgs, true);
+
+            int n = (r == null || r.ToolCalls == null) ? 0 : r.ToolCalls.Count;
+            List<object> names = new List<object>();
+            if (n > 0)
+            {
+                foreach (object o in r.ToolCalls)
+                {
+                    Dictionary<string, object> c = o as Dictionary<string, object>;
+                    Dictionary<string, object> fn = (c != null && c.ContainsKey("function"))
+                        ? (c["function"] as Dictionary<string, object>) : null;
+                    if (fn != null && fn.ContainsKey("name")) names.Add(Json.AsString(fn["name"]));
+                }
+            }
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["ok"] = true;
+            d["model"] = cfg.Model;
+            d["supported"] = (n > 0);
+            d["toolCalls"] = n;
+            d["names"] = names;
+            d["content"] = (r == null) ? "" : r.Content;
+            return d;
+        }
+
         static Dictionary<string, object> ToolMsg(string id, string name, string result)
         {
             Dictionary<string, object> m = new Dictionary<string, object>();
@@ -1728,7 +1769,10 @@ namespace AgentWeb
             body["messages"] = apiMessages;
             body["temperature"] = 0.7;
             if (useTools && cfg.AllowTools)
+            {
                 body["tools"] = ToolExecutor.Definitions();
+                body["tool_choice"] = "auto";
+            }
 
             string json = Json.ToString(body);
             byte[] payload = Encoding.UTF8.GetBytes(json);
@@ -1852,7 +1896,8 @@ namespace AgentWeb
             {
                 List<object> defs = ToolExecutor.Definitions();
                 body["tools"] = defs;
-                Console.WriteLine("[agent] stream: tools=on defs=" + defs.Count);
+                body["tool_choice"] = "auto";
+                Console.WriteLine("[agent] stream: model=" + cfg.Model + " tools=on defs=" + defs.Count);
             }
             else
             {
@@ -2002,6 +2047,11 @@ namespace AgentWeb
             Console.WriteLine("[agent] stream done: contentLen=" + finalContent.Length
                 + " toolCallFragments=" + acc.Count
                 + " toolCalls=" + (toolCallsOut == null ? 0 : toolCallsOut.Count));
+            if (cfg.AllowTools && finalContent.Length > 0 && (toolCallsOut == null || toolCallsOut.Count == 0))
+                Console.WriteLine("[agent] 注意: 本文のみでツール未使用でした。"
+                    + " モデル(" + cfg.Model + ")が function calling 非対応、"
+                    + " または API/プロキシが tools を無視している可能性があります。"
+                    + " ツール対応モデル(gpt-4o-mini 等)でお試しください。");
 
             LlmResp r = new LlmResp();
             r.Content = finalContent.ToString();

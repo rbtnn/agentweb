@@ -143,6 +143,7 @@ check.bat
 | `GET /static/<file>` | 静的ファイル |
 | `GET /api/health` | 接続状態・モデル名・キー設定・ツール可否・プロキシを JSON で返す |
 | `GET /api/tools` | 利用可能なツール定義（JSON Schema）を返す |
+| `GET /api/diag/tools` | モデルが function calling に対応しているかを確認（ツールは実行しない） |
 | `POST /api/tools` | `{allow:true|false}` でツール on/off を切り替え |
 | `POST /api/cancel` | 処理中の応答を停止 |
 | `POST /api/chat` | body: `{"message":"テキスト","session":"ID"}` → `{"ok":true,"reply":"..."}` |
@@ -184,6 +185,20 @@ check.bat
 | `[agent] stream: 非SSE応答(...)` | プロキシが `stream:true` を無視。JSON として解釈して続行 |
 
 > モデルが function calling に対応していない場合、ツールは呼ばれません（本文のみの応答になります）。
+
+### モデルがツールを呼ぶか確認する
+
+```bat
+curl http://localhost:8000/api/diag/tools
+```
+
+`"supported": true` なら function calling 対応です。`false` の場合は次のいずれかです。
+
+- モデル自体が function calling 非対応（例: 一部の推論特化モデル・小規模ローカルモデル）
+  → `gpt-4o-mini` などツール対応モデルでお試しください。
+- API/プロキシが `tools` を無視している（社内プロキシで落とされている等）
+
+リクエストには `tools` と `tool_choice: "auto"` を送信しています。
 
 ## セッション管理（Windows AppData に永続化）
 
