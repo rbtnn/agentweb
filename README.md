@@ -21,6 +21,7 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 | `run.bat` | ビルド済み `aw.exe`（コンソール版）を起動する補助スクリプト |
 | `check_consistency.py` | `AgentWeb.cs`（サーバ）と `index.html`（UI）の整合性チェック |
 | `check.bat` | 上記チェックを実行する補助スクリプト（Windows） |
+| `check.sh` | 上記チェックを実行する補助スクリプト（Linux / macOS / WSL） |
 | `README.md` | 本ドキュメント |
 
 > `build.bat` は **DOS(CRLF) + CP932(Shift-JIS)**、`AgentWeb.cs` は **UTF-8(BOM付き)** です。
@@ -132,6 +133,8 @@ API やイベント名の不一致で不具合になります。`check_consisten
 | セッション API | 一覧・詳細・作成・自動命名のレスポンスキーが一致するか |
 | `/api/tools` | `allowTools` などのキーが一致するか |
 | 構成 | `index.html` が外部ファイルとして存在し、埋め込み(base64)が残っていないか |
+| 相互再帰 | 同名オーバーロードが互いを呼び合っていないか（無限ループ→ `StackOverflowException` の原因） |
+| コンパイル | `csc` / `mcs` があれば `AgentWeb.cs` が実際にコンパイルできるか |
 
 ```bat
 python check_consistency.py
@@ -139,7 +142,17 @@ python check_consistency.py
 check.bat
 ```
 
+```sh
+python3 check_consistency.py
+# または
+./check.sh
+```
+
 - 終了コード: `0` = 問題なし（警告のみ）／`1` = 不整合あり
+- `--no-compile` を付けると C# コンパイル検証をスキップします（コンパイラが無い環境では自動でスキップ）。
+- **同名オーバーロードの相互再帰**は、引数の違う同名メソッドが互いを呼び合う典型的な
+  `StackOverflowException` の原因です。1 つのオーバーロードから別のオーバーロードへ委譲する場合は、
+  必ず**一番引数の少ない版に集約**し、そこから他の版を呼ばないようにしてください。
 - `build.bat` は **Python が使える場合のみ自動で実行**し、不整合があるとビルドを中止します。
   - `py -3` → `python` の順に検出し、実際に起動できるか（`-c "import sys"`）まで確認します。
   - Python が無い / 実行できない場合（Microsoft Store 版のスタブ等）は**警告を出してスキップ**し、

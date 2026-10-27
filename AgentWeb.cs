@@ -1773,16 +1773,20 @@ namespace AgentWeb
         }
 
         // ツール実行の記録を添えたメッセージ(UI でリロード後も表示できるよう保存する)
+        // 注意: 4引数版へ委譲すると相互再帰で StackOverflow になるため、ここで組み立てる。
         static Dictionary<string, object> Msg(string role, string content, List<object> steps)
         {
-            return Msg(role, content, steps, null);
+            Dictionary<string, object> m = Msg(role, content);
+            if (steps != null && steps.Count > 0) m["steps"] = steps;
+            return m;
         }
 
         // 思考(reasoning_content)も添えたメッセージ。
         // steps と同じく保存専用メタデータで、LLM API へは送らない。
         static Dictionary<string, object> Msg(string role, string content, List<object> steps, string think)
         {
-            Dictionary<string, object> m = Msg(role, content, steps);
+            Dictionary<string, object> m = Msg(role, content);
+            if (steps != null && steps.Count > 0) m["steps"] = steps;
             if (think != null && think.Trim().Length > 0) m["think"] = think;
             return m;
         }

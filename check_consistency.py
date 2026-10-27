@@ -14,9 +14,11 @@ AgentWeb.cs（サーバ）と index.html（Web UI）の整合性を検査しま�
   6. セッション詳細  : /api/sessions/<id> のキーとメッセージのキーが一致するか
   7. ツール設定      : /api/tools の allowTools キーが一致するか
   8. 構成            : index.html が外部ファイルとして存在し、埋め込み(base64)が残っていないか
+  9. 相互再帰        : 同名オーバーロードが互いを呼び合っていないか（StackOverflow の原因）
+ 10. コンパイル      : csc / mcs があれば AgentWeb.cs が実際にコンパイルできるか
 
 使い方:
-    python check_consistency.py [--quiet]
+    python check_consistency.py [--quiet] [--no-compile]
 
 終了コード:
     0 = 問題なし（警告のみの場合も 0）
@@ -25,7 +27,10 @@ AgentWeb.cs（サーバ）と index.html（Web UI）の整合性を検査しま�
 
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CS_PATH = os.path.join(HERE, "AgentWeb.cs")
@@ -239,6 +244,217 @@ def client_fetches(html):
 # --------------------------------------------------------------------------
 #  検査
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+#  C# メソッド抽出（同名オーバーロードの相互再帰 = StackOverflow 検出用）
+# --------------------------------------------------------------------------
+_CS_MODS = (r'(?:public|private|protected|internal|static|virtual|override|sealed|'
+            r'abstract|async|unsafe|extern|new|partial|const|volatile|readonly)')
+# return 型のキーワード（これを ret として誤認しない）
+_CS_KW = set((
+    "return if while for foreach switch catch using lock throw new else do try "
+    "fixed checked unchecked sizeof typeof nameof default case break continue "
+    "yield await in is as out ref params base this void"
+).split())
+_CS_SIG = re.compile(
+    r'(?m)^[ \t]*(?:(?:' + _CS_MODS + r')[ \t]+)*'
+    r'(?P<ret>[A-Za-z_][\w<>\[\],\.\?]*(?:[ \t]+[A-Za-z_][\w<>\[\],\.\?]*)*)[ \t]+'
+    r'(?P<name>[A-Za-z_]\w*)[ \t]*'
+    r'\((?P<params>[^;{}]*)\)[ \t\r\n]*(?:where[^\r\n{]*[ \t\r\n]*)*\{'
+)
+
+
+def cs_strip_noncode(src):
+    """C# のコメント・文字列・文字リテラルを同長の空白に置換する（位置を保つ）。"""
+    out = list(src)
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c == "/" and i + 1 < n and src[i + 1] == "*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                if src[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif c == "@" and i + 1 < n and src[i + 1] == '"':
+            i += 2
+            while i < n:
+                if src[i] == '"' and i + 1 < n and src[i + 1] == '"':
+                    i += 2
+                    continue
+                if src[i] == '"':
+                    i += 1
+                    break
+                out[i] = " "
+                i += 1
+        elif c == '"':
+            i += 1
+            while i < n:
+                if src[i] == "\\":
+                    i += 2
+                    continue
+                if src[i] == '"':
+                    i += 1
+                    break
+                out[i] = " "
+                i += 1
+        elif c == "'":
+            i += 1
+            while i < n:
+                if src[i] == "\\":
+                    i += 2
+                    continue
+                if src[i] == "'":
+                    i += 1
+                    break
+                out[i] = " "
+                i += 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _cs_arg_count(text):
+    """実引数/仮引数リストの個数を数える（括弧・山括弧・波括弧の入れ子を考慮）。"""
+    if not text.strip():
+        return 0
+    depth = 0
+    commas = 0
+    for ch in text:
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            commas += 1
+    return commas + 1
+
+
+def cs_methods(src):
+    """[(name, param_count, body)] を返す。コメント/文字列は除去済みで解析する。"""
+    code = cs_strip_noncode(src)
+    out = []
+    for m in _CS_SIG.finditer(code):
+        name = m.group("name")
+        if name in _CS_KW or m.group("ret") in _CS_KW:
+            continue
+        start = m.end() - 1
+        depth = 0
+        j = start
+        while j < len(code):
+            if code[j] == "{":
+                depth += 1
+            elif code[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append((name, _cs_arg_count(m.group("params")), code[start + 1:j]))
+    return out
+
+
+def find_self_delegation_cycles(src):
+    """同名オーバーロード同士の相互再帰（StackOverflow の原因）を検出する。
+
+    「同じ名前・同じ引数個数」のメソッドが互いを呼び合っていると無限再帰になる。
+    戻り値: [[(name, argc), ...], ...] のサイクル一覧。
+    """
+    methods = cs_methods(src)
+    by_name = {}
+    for name, argc, _body in methods:
+        by_name.setdefault(name, set()).add(argc)
+
+    adj = {}
+    for name, argc, body in methods:
+        counts = by_name.get(name) or set()
+        if len(counts) < 2:
+            continue
+        for cm in re.finditer(r"(?<![\w.])" + re.escape(name) + r"[ \t]*\(", body):
+            st = cm.end() - 1
+            depth = 0
+            k = st
+            while k < len(body):
+                if body[k] == "(":
+                    depth += 1
+                elif body[k] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            called = _cs_arg_count(body[st + 1:k])
+            if called in counts:
+                adj.setdefault((name, argc), set()).add((name, called))
+
+    cycles = []
+    seen_keys = set()
+    for root in list(adj):
+        stack = [(root, [root])]
+        while stack:
+            node, path = stack.pop()
+            for nxt in adj.get(node, ()):
+                if nxt in path:
+                    cyc = path[path.index(nxt):] + [nxt]
+                    key = frozenset(cyc)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        cycles.append(cyc)
+                    continue
+                stack.append((nxt, path + [nxt]))
+    return cycles
+
+
+def find_cs_compiler():
+    """利用可能な C# コンパイラを (種別, パス) で返す。無ければ None。"""
+    for name in ("csc", "mcs"):
+        p = shutil.which(name)
+        if p:
+            return (name, p)
+    p = shutil.which("dotnet")
+    if p:
+        return ("dotnet", p)
+    return None
+
+
+def compile_check():
+    """AgentWeb.cs が実際にコンパイルできるか検証する（可能な場合のみ）。"""
+    comp = find_cs_compiler()
+    if not comp:
+        warn("C# コンパイラ (csc/mcs/dotnet) が無いためコンパイル検証をスキップしました")
+        return
+    kind, path = comp
+    tmpdir = tempfile.mkdtemp(prefix="agentweb_build_")
+    try:
+        if kind == "dotnet":
+            # dotnet では単一ファイルの手軽なコンパイルが難しいため mcs/csc を優先
+            warn("dotnet のみ検出。単一 .cs の検証は csc / mcs を推奨します")
+            return
+        out = os.path.join(tmpdir, "aw_check.exe")
+        cmd = [path, "/nologo", "/target:exe", "/out:" + out]
+        if kind == "mcs":
+            # build.bat は .NET 4.5 / C#5 の csc.exe を使うため、同じ言語版で検査する
+            cmd.append("-langversion:5")
+        cmd.append(CS_PATH)
+        proc = subprocess.run(cmd, cwd=HERE, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT)
+        output = proc.stdout.decode("utf-8", "replace").strip()
+        if proc.returncode == 0:
+            ok("C# コンパイル成功 (%s)" % kind)
+        else:
+            lines = [l for l in output.splitlines() if l.strip()]
+            shown = "\n".join(lines[:8])
+            if len(lines) > 8:
+                shown += "\n... 他 %d 件" % (len(lines) - 8)
+            fail("C# コンパイル失敗 (%s):\n%s" % (kind, shown))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def check():
     if not os.path.isfile(CS_PATH):
         fail("AgentWeb.cs が見つかりません: " + CS_PATH)
@@ -399,6 +615,23 @@ def check():
         ok("/api/tools フィールド一致: " + ", ".join(sorted(c_tools)))
     else:
         warn("/api/tools の UI 参照を抽出できませんでした")
+
+    # --- 9. 同名オーバーロードの相互再帰（StackOverflow の原因） -------------
+    #  例: Msg(role,content,steps) が Msg(role,content,steps,null) を呼び、
+    #      4引数版が 3引数版を呼ぶと無限再帰になり StackOverflowException で落ちる。
+    cycles = find_self_delegation_cycles(cs)
+    if cycles:
+        for cyc in cycles:
+            path = " -> ".join("%s(%d引数)" % (n, k) for n, k in cyc)
+            fail("同名オーバーロードの相互再帰（無限ループ→StackOverflow）: " + path)
+    else:
+        ok("同名オーバーロードの相互再帰はありません")
+
+    # --- 10. C# コンパイル検証 ----------------------------------------------
+    if "--no-compile" in sys.argv[1:]:
+        pass
+    else:
+        compile_check()
 
 
 def main():
