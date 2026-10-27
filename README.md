@@ -22,6 +22,7 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 | `check_consistency.py` | `AgentWeb.cs`（サーバ）と `index.html`（UI）の整合性チェック |
 | `check.bat` | 上記チェックを実行する補助スクリプト（Windows） |
 | `check.sh` | 上記チェックを実行する補助スクリプト（Linux / macOS / WSL） |
+| `test_e2e.py` | モック LLM を立てて実際に `aw.exe` を走らせる実行時回帰テスト（要 `mono` + `mcs`） |
 | `README.md` | 本ドキュメント |
 
 > `build.bat` は **DOS(CRLF) + CP932(Shift-JIS)**、`AgentWeb.cs` は **UTF-8(BOM付き)** です。
@@ -153,6 +154,26 @@ python3 check_consistency.py
 - **同名オーバーロードの相互再帰**は、引数の違う同名メソッドが互いを呼び合う典型的な
   `StackOverflowException` の原因です。1 つのオーバーロードから別のオーバーロードへ委譲する場合は、
   必ず**一番引数の少ない版に集約**し、そこから他の版を呼ばないようにしてください。
+
+### 実行時回帰テスト（Linux / macOS / WSL）
+
+静的チェックでは見つからない**実行時にしか出ない不具合**（無限再帰による
+`StackOverflowException` など）は、`test_e2e.py` がモック LLM を立てて実際に `aw.exe` を
+起動し、1 ターン走らせて検証します（`mono` と `mcs`/`csc` が必要）。
+
+```sh
+python3 test_e2e.py
+python3 test_e2e.py --keep   # 一時ディレクトリを残して調査する
+```
+
+| 検証 | 内容 |
+|---|---|
+| ストリーミング | SSE が `reasoning`→`tool`→`toolend`→`content`→`done`→`end` と完走するか |
+| ツールループ | ツール呼び出し→実行→再問い合わせが動くか |
+| セッション保存 | `think` / `steps` / `content` が保存され、復元できるか |
+| 非ストリーミング | `/api/chat` でも `reasoning_content` が保存されるか |
+| メタデータ漏れ | `think` / `steps` / `ts` が LLM API へ送られていないか |
+| クラッシュ | 応答途中でプロセスが落ちないか（`StackOverflow` の再発検出） |
 - `build.bat` は **Python が使える場合のみ自動で実行**し、不整合があるとビルドを中止します。
   - `py -3` → `python` の順に検出し、実際に起動できるか（`-c "import sys"`）まで確認します。
   - Python が無い / 実行できない場合（Microsoft Store 版のスタブ等）は**警告を出してスキップ**し、
