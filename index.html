@@ -124,7 +124,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 14px;
+    padding: 12px 14px 12px 54px;   /* 左はフローティング × の分を空ける */
     border-bottom: 1px solid var(--border);
   }
   .sidebar-title { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
@@ -307,15 +307,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .md th { background: var(--panel); }
   .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 
-  /* ---------- typing / tool / thinking ---------- */
-  .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
-  .typing span {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--muted);
-    animation: blink 1.2s infinite;
-  }
-  .typing span:nth-child(2) { animation-delay: .2s; }
-  .typing span:nth-child(3) { animation-delay: .4s; }
+  /* ---------- waiting / tool / thinking ---------- */
   .progress {
     margin: 0 0 8px;
     display: flex; flex-direction: column; gap: 2px;
@@ -324,8 +316,12 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     border-radius: 10px;
     padding: 7px 10px;
   }
-  .waiting { margin: 0 0 2px; }
-  .waiting .typing { padding: 2px 0; }
+  /* 待機表示 (Pi Web の chat.waitingModel と同じパルス文字) */
+  .waiting { margin: 0 0 2px; font-size: 13px; color: var(--text-muted); }
+  .waiting .wtext { animation: wpulse 1.5s infinite; }
+  @keyframes wpulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  /* Thinking ヘッダの tok/s (Pi Web 風) */
+  .think > summary .rate { color: var(--text-dim); font-family: var(--font-mono); font-size: 11px; margin-left: 6px; }
   .pstep { font-size: 11.5px; color: var(--accent); word-break: break-all; font-weight: 600; }
   .pdetail {
     font-size: 11.5px; color: var(--muted);
@@ -388,20 +384,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .theme-link:hover { background: var(--panel-2); color: var(--text); }
   .sidebar.hidden { display: none; }
   .side-actions { display: flex; gap: 4px; align-items: center; }
-  .ctl-x { width: 24px; height: 24px; font-size: 14px; }
   .composer-left { display: flex; flex-direction: column; gap: 4px; flex: none; padding-bottom: 4px; }
-  .ctl {
-    width: 36px; height: 28px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--muted);
-    font-size: 14px; line-height: 1;
-    cursor: pointer;
-    display: grid; place-items: center;
-  }
-  .ctl:hover { background: var(--panel-2); color: var(--text); }
-  .ctl.stop { color: var(--danger); }
   textarea {
     width: 100%;
     resize: none;
@@ -472,6 +455,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     backdrop-filter: blur(3px);
   }
   .fab:hover { opacity: 1; }
+  .fab.on { display: grid; }   /* 表示中(ハンバーガー/×で排他) */
 
   /* ---------- 設定モーダル (Pi Web のモーダルに合わせた見た目) ---------- */
   .modal-overlay {
@@ -595,13 +579,14 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
 </style>
 </head>
 <body>
+  <!-- ハンバーガーと × は同じ位置(左上)に固定し、表示だけ切り替える -->
   <button type="button" id="sideToggle" class="fab" title="サイドバーを表示">☰</button>
+  <button type="button" id="sideClose" class="fab" title="サイドバーを閉じる">×</button>
   <div class="layout">
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-head">
         <span class="sidebar-title">Sessions</span>
         <div class="side-actions">
-          <button type="button" id="sideClose" class="ctl ctl-x" title="サイドバーを閉じる">×</button>
           <button type="button" id="newBtn" class="new-btn" title="新規セッション">＋</button>
         </div>
       </div>
@@ -897,11 +882,13 @@ function assistantMsg(md, ts, steps) {
   }
   return el;
 }
+// 待機中の表示 (Pi Web の "Waiting for model..." と同じ)
+function waitingHtml() { return '<span class="wtext">Waiting for model...</span>'; }
 function addTyping() {
   var row = document.createElement("div");
   row.className = "msg assistant";
   row.id = "typing";
-  row.innerHTML = '<div class="bubble"><div class="typing"><span></span><span></span><span></span></div><div class="progress" id="progressBox"></div></div>';
+  row.innerHTML = '<div class="bubble"><div class="waiting">' + waitingHtml() + '</div><div class="progress" id="progressBox"></div></div>';
   chatEl.appendChild(row);
   scrollBottom();
   return row;
@@ -1246,10 +1233,10 @@ function send() {
   prog.style.display = "none";
   bubbleEl.insertBefore(prog, mdEl);
 
-  // 待機中アニメーション(3点ドット)。thinking が無いモデルでも「動いている」ことが分かるように
+  // 待機表示: Pi Web と同じ "Waiting for model..."
   var waitEl = document.createElement("div");
   waitEl.className = "waiting";
-  waitEl.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  waitEl.innerHTML = waitingHtml();
   bubbleEl.insertBefore(waitEl, mdEl);
   function hideWait() {
     if (waitEl && waitEl.parentNode) waitEl.parentNode.removeChild(waitEl);
@@ -1288,7 +1275,10 @@ function send() {
     thinkEl.className = "think";
     thinkEl.open = true;
     var sum = document.createElement("summary");
-    sum.textContent = "思考";
+    sum.textContent = "Thinking...";
+    rateEl = document.createElement("span");   // tok/s 表示 (Pi Web 風)
+    rateEl.className = "rate";
+    sum.appendChild(rateEl);
     thinkBody = document.createElement("div");
     thinkBody.className = "think-body";
     thinkEl.appendChild(sum);
@@ -1298,6 +1288,27 @@ function send() {
 
   var fullText = "";
   var lastPaint = 0;
+
+  // --- tok/s 表示 (Pi Web 風) ---
+  // 出力文字数から概算する (4文字 ≒ 1トークン)。直近3秒の移動平均。
+  var rateChars = 0;
+  var rateSamples = [];
+  var rateTimer = null;
+  var rateEl = null;
+  function rateTick() {
+    var now = Date.now();
+    rateSamples.push({ t: now, c: rateChars });
+    while (rateSamples.length > 1 && now - rateSamples[0].t > 3000) rateSamples.shift();
+    if (!rateEl || rateSamples.length < 2) return;
+    var a = rateSamples[0], b = rateSamples[rateSamples.length - 1];
+    var dt = (b.t - a.t) / 1000;
+    if (dt <= 0.2) return;
+    var v = (b.c - a.c) / 4 / dt;
+    rateEl.textContent = v > 0 ? (" · " + v.toFixed(1) + " tok/s") : "";
+  }
+  function startRate() { if (!rateTimer) rateTimer = setInterval(rateTick, 250); }
+  function stopRate() { if (rateTimer) { clearInterval(rateTimer); rateTimer = null; } }
+  startRate();
   function paint(force) {
     var now = Date.now();
     if (!force && now - lastPaint < 40) return;
@@ -1320,8 +1331,10 @@ function send() {
     function handle(ev, dat) {
       var d = null; try { d = JSON.parse(dat); } catch(e){}
       if (ev === "content" && d) {
-        fullText += (d.t || "");
-        if (fullText.length > 0) hideWait();   // 最初の本文が来たら待機アニメを消す
+        var ct = (d.t || "");
+        fullText += ct;
+        rateChars += ct.length;
+        if (fullText.length > 0) hideWait();   // 最初の本文が来たら待機表示を消す
         paint(false);
       }
       else if (ev === "reasoning" && d) {
@@ -1329,6 +1342,7 @@ function send() {
         if (rt.length > 0) {
           hideWait();
           ensureThink();
+          rateChars += rt.length;
           thinkText += rt;
           thinkBody.textContent = thinkText;
           scrollBottom();
@@ -1345,11 +1359,13 @@ function send() {
       }
       else if (ev === "error" && d) {
         hideWait();
+        stopRate();
         stopProgressPoll();
         bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ ' + escapeHtml(String(d.message||"エラー")) + '</div></div>';
       }
       else if (ev === "done" && d) {
         hideWait();
+        stopRate();
         pollProgress();          // 最後の進捗を反映
         stopProgressPoll();
         // 思考は自動で折りたたまない(必要なとき手動で閉じる)
@@ -1379,6 +1395,7 @@ function send() {
     return pump();
   }).then(function(){ paint(true); })
     .catch(function(err){
+      stopRate();
       stopProgressPoll();
       bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ 通信エラー: ' + escapeHtml(String(err)) + '</div></div>';
       refreshSessionList();
@@ -1413,8 +1430,11 @@ toolsBadge.addEventListener("click", function(){
 function applySidebar(show) {
   var sb = document.getElementById("sidebar");
   var fab = document.getElementById("sideToggle");
+  var xbtn = document.getElementById("sideClose");
   if (sb) sb.classList.toggle("hidden", !show);
-  if (fab) fab.style.display = show ? "none" : "block"; // 非表示時のみハンバーガーを表示
+  // ハンバーガーと × は常に同じ位置(左上)に固定。表示だけ入れ替える。
+  if (fab) fab.classList.toggle("on", !show);
+  if (xbtn) xbtn.classList.toggle("on", show);
   try{ localStorage.setItem("aiagent.sidebar", show ? "1" : "0"); }catch(e){}
 }
 function initSidebar() {
