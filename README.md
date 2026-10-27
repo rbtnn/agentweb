@@ -258,3 +258,26 @@ git config user.email "rfc@earendil.com"
 ## ライセンス
 本プロジェクトは自由に利用・改変して構いません。
 Web UI はダークカラー配色（#09090b / #1a1a1a / #e8e8e8 / #9ca3af / #3a3a3a / #60a5fa）です。
+
+## デザイン (Pi Web 風テーマ)
+
+UI の配色・形状は Pi Web の CSS 変数をそのまま踏襲しています。
+
+| 変数 | ダーク | ライト |
+| --- | --- | --- |
+| `--bg` | `#1a1a1a` | `#ffffff` |
+| `--panel` (`--bg-panel`) | `#242424` | `#f5f5f5` |
+| `--panel-2` (`--bg-hover`) | `#2e2e2e` | `#eeeeee` |
+| `--panel-3` (`--bg-selected`) | `#383838` | `#e8e8e8` |
+| `--border` | `#3a3a3a` | `#e0e0e0` |
+| `--text` | `#e8e8e8` | `#1a1a1a` |
+| `--muted` (`--text-muted`) | `#9ca3af` | `#6b7280` |
+| `--dim` (`--text-dim`) | `#6b7280` | `#9ca3af` |
+| `--accent` | `#60a5fa` | `#2563eb` |
+| `--user-bg` | `#1e293b` | `#eff6ff` |
+| `--tool-bg` | `#1f2937` | `#f9fafb` |
+
+- ユーザー発言: `--user-bg` 背景・`rgba(59,130,246,.2)` 枠・角丸 12px（Pi Web と同じ）
+- アシスタント発言: 吹き出しなしのフラット表示（全文幅）
+- ツール実行: `--tool-bg` のカード表示（等幅フォント）
+- 本文は 14px / 行間 1.6、コードは等幅フォント
