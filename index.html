@@ -36,6 +36,10 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     --subtle: rgba(255,255,255,.04);
     --danger: #f87171;
     --radius: 8px;
+    /* 下部バーの高さ（セッション欄と settings を揃える） */
+    --bar-h: 30px;
+    /* 入力欄と送信ボタンの高さ（同じ値で揃える） */
+    --input-h: 52px;
     /* 旧名 (エイリアス) */
     --panel: var(--bg-panel);
     --panel-2: var(--bg-hover);
@@ -248,19 +252,13 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     flex-wrap: wrap;
   }
   .composer .side { display: flex; flex-direction: column; align-items: stretch; gap: 8px; flex: 1; min-width: 0; }
-  /* 右側の列: 送信ボタンと、その真下に settings ボタン */
-  .composer-right {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-  }
+  /* settings はバー行の右端(送信ボタンの真下) */
   .settings-btn {
-    width: 100%;
-    height: 26px;
-    padding: 0 9px;
+    margin-left: auto;     /* 右端へ寄せる */
+    height: var(--bar-h);
+    padding: 0 10px;
     font-size: 11px;
+    line-height: 1;
     white-space: nowrap;
     text-align: center;
   }
@@ -286,6 +284,9 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     padding: 3px 9px;
   }
   .theme-link:hover { background: var(--panel-2); color: var(--text); }
+  /* 思考中は settings ボタンを無効化する */
+  .theme-link:disabled { opacity: .45; cursor: default; }
+  .theme-link:disabled:hover { background: var(--bg); color: var(--muted); }
 
   /* ---------- セッション欄（左寄せ） ---------- */
   .sess-panel {
@@ -300,7 +301,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .sess-select {
     flex: 1 1 auto;
     min-width: 0;
-    height: 26px;
+    height: var(--bar-h);
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--bg);
@@ -313,6 +314,9 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   }
   .sess-select:hover { background: var(--panel-2); }
   .sess-select:focus { border-color: var(--accent); }
+  /* 思考中はドロップダウンを無効化する */
+  .sess-select:disabled { opacity: .45; cursor: default; background: var(--bg); }
+  .sess-select:disabled:hover { background: var(--bg); }
   .sess-select option { background: var(--bg); color: var(--text); }
   /* ボタンはサイドバーと同じアイコンボタン（常時表示） */
   .sess-actions { display: flex; align-items: center; gap: 2px; flex: none; }
@@ -321,7 +325,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .sess-actions .s-del,
   .sess-actions .s-new {
     flex: none;
-    width: 22px; height: 22px;
+    width: var(--bar-h); height: var(--bar-h);
     border: none;
     border-radius: 4px;
     background: transparent;
@@ -337,16 +341,18 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .sess-actions .s-new:hover { background: var(--panel-2); color: var(--accent); }
   .sess-actions .s-auto:disabled,
   .sess-actions .s-ren:disabled,
-  .sess-actions .s-del:disabled { opacity: .4; cursor: default; background: transparent; color: var(--muted); }
+  .sess-actions .s-del:disabled,
+  .sess-actions .s-new:disabled { opacity: .4; cursor: default; background: transparent; color: var(--muted); }
   .sess-actions .s-auto:disabled:hover,
   .sess-actions .s-ren:disabled:hover,
-  .sess-actions .s-del:disabled:hover { background: transparent; color: var(--muted); }
+  .sess-actions .s-del:disabled:hover,
+  .sess-actions .s-new:disabled:hover { background: transparent; color: var(--muted); }
   /* 名前変更はドロップダウンを入力欄に差し替えてインライン編集する */
   .sess-select.editing { display: none; }
   .sess-edit {
     flex: 1 1 auto;
     min-width: 0;
-    height: 26px;
+    height: var(--bar-h);
     border: 1px solid var(--accent);
     border-radius: 6px;
     background: var(--bg);
@@ -367,7 +373,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     font-size: 14px;
     line-height: 1.6;
     padding: 11px 13px;
-    min-height: 52px;
+    min-height: var(--input-h);
     max-height: 200px;
     outline: none;
     transition: border-color .12s ease;
@@ -376,7 +382,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   textarea:focus { border-color: var(--accent); }
   button.send {
     flex: none;
-    height: 46px; min-width: 62px;
+    height: var(--input-h); min-width: 62px;
     border: 1px solid var(--accent);
     border-radius: 10px;
     background: var(--accent);
@@ -542,14 +548,11 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
       <div class="side">
         <textarea id="input" rows="1" placeholder="AI エージェントに質問する…  (Enter で送信 / Shift+Enter で改行)"></textarea>
       </div>
-      <div class="composer-right">
-        <button type="button" class="send" id="sendBtn" disabled title="送信">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M3.4 20.4 22 12 3.4 3.6 3.4 10 15 12 3.4 14Z"/>
-          </svg>
-        </button>
-        <button type="button" class="theme-link settings-btn" id="settingsBtn" title="設定">⚙ settings</button>
-      </div>
+      <button type="button" class="send" id="sendBtn" disabled title="送信">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M3.4 20.4 22 12 3.4 3.6 3.4 10 15 12 3.4 14Z"/>
+        </svg>
+      </button>
     </div>
     <div class="composer-bar">
       <div class="sess-panel">
@@ -561,6 +564,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
           <button type="button" class="s-new" id="settingsNew" title="新しいセッションを作成">＋</button>
         </div>
       </div>
+      <button type="button" class="theme-link settings-btn" id="settingsBtn" title="設定">⚙ settings</button>
     </div>
   </footer>
 
@@ -711,6 +715,7 @@ var sessAutotitle = document.getElementById("settingsAutotitle");
 var sessRenameBtn = document.getElementById("settingsRename");
 var sessDeleteBtn = document.getElementById("settingsDelete");
 var sessNewBtn    = document.getElementById("settingsNew");
+var settingsBtn   = document.getElementById("settingsBtn");
 var sessItems = [];      // 表示中のセッション [{id,title,count}]
 var sessSelId = "";      // ドロップダウンで選択中の ID
 var allowTools = true;   // 設定モーダルでのみ変更する
@@ -1055,9 +1060,10 @@ function setSendAsStop(b) {
 }
 function setBusy(b) {
   busy = b;
-  sendBtn.disabled = false;   // busy中は送信ボタンを「停止」として使う
+  sendBtn.disabled = false;   // busy中は送信ボタンを「停止」として使う(唯一の有効なボタン)
   sendBtn.style.opacity = "1";
   setSendAsStop(b);
+  updateSessButtons();        // 停止ボタン以外は思考中に無効化する
 }
 
 function hideTyping() {
@@ -1412,6 +1418,7 @@ var settingsOriginPort = null;
 })();
 
 function openSettings(){
+  if (busy) return;   // 思考中は停止ボタン以外を操作できない
   fetch("/api/config")
     .then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
@@ -1445,9 +1452,15 @@ function updateSessButtons(){
   for (var i = 0; i < sessItems.length; i++) {
     if (sessItems[i].id === sessSelId) { has = true; break; }
   }
-  sessAutotitle.disabled = !has;
-  if (sessRenameBtn) sessRenameBtn.disabled = !has;
-  sessDeleteBtn.disabled = !has;
+  // 思考中(busy)は停止ボタン以外を操作できないようにする
+  var usable = has && !busy;
+  sessAutotitle.disabled = !usable;
+  if (sessRenameBtn) sessRenameBtn.disabled = !usable;
+  sessDeleteBtn.disabled = !usable;
+  if (sessNewBtn) sessNewBtn.disabled = busy;
+  // ドロップダウンと settings ボタンも思考中は無効
+  if (sessListBox) sessListBox.disabled = busy;
+  if (settingsBtn) settingsBtn.disabled = busy;
 }
 
 function renderSettingsSessions(sessions, selected){
