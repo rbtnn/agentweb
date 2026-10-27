@@ -909,6 +909,7 @@ namespace AgentWeb
                     mv["content"] = content;
                     mv["ts"] = (m.ContainsKey("ts")) ? Json.AsString(m["ts"]) : "";
                     if (m.ContainsKey("steps")) mv["steps"] = m["steps"];   // ツール実行の記録
+                    if (m.ContainsKey("think")) mv["think"] = m["think"];   // 思考(reasoning)の記録
                     view.Add(mv);
                 }
             }
@@ -1463,6 +1464,7 @@ namespace AgentWeb
             AgentProgress.Clear();
             AgentControl.Reset();
             List<object> turnSteps = new List<object>();   // このターンのツール実行記録
+            StringBuilder turnThink = new StringBuilder(); // このターンの思考(reasoning_content)
 
             // トークン超過時は古い文脈を要約して置換(コンパクション)
             MaybeCompact(cfg, ctx);
@@ -1472,7 +1474,7 @@ namespace AgentWeb
             {
                 for (int turn = 0; turn < MAX_TURNS; turn++)
                 {
-                    if (AgentControl.CancelRequested) return CancelReply(ctx, turnSteps);
+                    if (AgentControl.CancelRequested) return CancelReply(ctx, turnSteps, ThinkOf(cfg, turnThink));
 
                     List<object> eff = BuildEffectiveMessages(cfg, ctx);
                     LlmResp resp;
@@ -1482,9 +1484,11 @@ namespace AgentWeb
                     }
                     catch (AgentCancelledException)
                     {
-                        return CancelReply(ctx, turnSteps);
+                        return CancelReply(ctx, turnSteps, ThinkOf(cfg, turnThink));
                     }
                     if (resp.TotalTokens > 0) ctx.LastTotalTokens = resp.TotalTokens;
+                    if (cfg.EmitReasoning && resp.Reasoning != null && resp.Reasoning.Length > 0)
+                        turnThink.Append(resp.Reasoning);
 
                     if (resp.ToolCalls != null && resp.ToolCalls.Count > 0)
                     {
@@ -1494,7 +1498,7 @@ namespace AgentWeb
                         int n = Math.Min(resp.ToolCalls.Count, cfg.MaxToolsPerTurn);
                         for (int k = 0; k < n; k++)
                         {
-                            if (AgentControl.CancelRequested) return CancelReply(ctx, turnSteps);
+                            if (AgentControl.CancelRequested) return CancelReply(ctx, turnSteps, ThinkOf(cfg, turnThink));
 
                             Dictionary<string, object> call = resp.ToolCalls[k] as Dictionary<string, object>;
                             if (call == null) { continue; }
@@ -1550,7 +1554,7 @@ namespace AgentWeb
 
                     // 最終回答
                     string final = resp.Content;
-                    ctx.Messages.Add(Msg("assistant", final, turnSteps));
+                    ctx.Messages.Add(Msg("assistant", final, turnSteps, ThinkOf(cfg, turnThink)));
                     return final;
                 }
                 throw new Exception("LLM が最終回答を出せませんでした(ツール反復が多すぎます)");
@@ -1561,10 +1565,22 @@ namespace AgentWeb
             }
         }
 
+        // 蓄積した思考を、保存する文字列に変換する(未設定・EmitReasoning 無効なら null)
+        static string ThinkOf(Config cfg, StringBuilder sb)
+        {
+            if (cfg == null || !cfg.EmitReasoning || sb == null || sb.Length == 0) return null;
+            return sb.ToString();
+        }
+
         static string CancelReply(SessionCtx ctx, List<object> steps)
         {
+            return CancelReply(ctx, steps, null);
+        }
+
+        static string CancelReply(SessionCtx ctx, List<object> steps, string think)
+        {
             string msg = "⚠ 処理を中断しました。";
-            ctx.Messages.Add(Msg("assistant", msg, steps));
+            ctx.Messages.Add(Msg("assistant", msg, steps, think));
             return msg;
         }
 
@@ -1759,8 +1775,15 @@ namespace AgentWeb
         // ツール実行の記録を添えたメッセージ(UI でリロード後も表示できるよう保存する)
         static Dictionary<string, object> Msg(string role, string content, List<object> steps)
         {
-            Dictionary<string, object> m = Msg(role, content);
-            if (steps != null && steps.Count > 0) m["steps"] = steps;
+            return Msg(role, content, steps, null);
+        }
+
+        // 思考(reasoning_content)も添えたメッセージ。
+        // steps と同じく保存専用メタデータで、LLM API へは送らない。
+        static Dictionary<string, object> Msg(string role, string content, List<object> steps, string think)
+        {
+            Dictionary<string, object> m = Msg(role, content, steps);
+            if (think != null && think.Trim().Length > 0) m["think"] = think;
             return m;
         }
 
@@ -1896,7 +1919,7 @@ namespace AgentWeb
                 if (m == null) { apiMessages.Add(o); continue; }
                 Dictionary<string, object> c = new Dictionary<string, object>();
                 foreach (KeyValuePair<string, object> kv in m)
-                    if (kv.Key != "ts" && kv.Key != "steps") c[kv.Key] = kv.Value;   // 保存用メタデータは送らない
+                    if (kv.Key != "ts" && kv.Key != "steps" && kv.Key != "think") c[kv.Key] = kv.Value;   // 保存用メタデータは送らない
                 apiMessages.Add(c);
             }
             body["messages"] = apiMessages;
@@ -2019,7 +2042,7 @@ namespace AgentWeb
                 if (m == null) { apiMessages.Add(o); continue; }
                 Dictionary<string, object> c = new Dictionary<string, object>();
                 foreach (KeyValuePair<string, object> kv in m)
-                    if (kv.Key != "ts" && kv.Key != "steps") c[kv.Key] = kv.Value;   // 保存用メタデータは送らない
+                    if (kv.Key != "ts" && kv.Key != "steps" && kv.Key != "think") c[kv.Key] = kv.Value;   // 保存用メタデータは送らない
                 apiMessages.Add(c);
             }
             body["messages"] = apiMessages;
@@ -2298,6 +2321,7 @@ namespace AgentWeb
             AgentProgress.Clear();
             AgentControl.Reset();
             List<object> turnSteps = new List<object>();   // このターンのツール実行記録
+            StringBuilder turnThink = new StringBuilder(); // このターンの思考(reasoning_content)
             MaybeCompact(cfg, ctx);
             if (save != null) save(ctx);
 
@@ -2307,7 +2331,7 @@ namespace AgentWeb
                 {
                     if (AgentControl.CancelRequested)
                     {
-                        ctx.Messages.Add(Msg("assistant", "⚠ 処理を中断しました。", turnSteps));
+                        ctx.Messages.Add(Msg("assistant", "⚠ 処理を中断しました。", turnSteps, ThinkOf(cfg, turnThink)));
                         if (emit != null) emit("done", "{\"stopped\":true}");
                         return;
                     }
@@ -2321,6 +2345,7 @@ namespace AgentWeb
                         },
                         delegate (string d)
                         {
+                            turnThink.Append(d);   // リロード後も表示できるよう思考を保存する
                             if (emit != null) emit("reasoning", "{ \"t\" : \"" + JsonEscape(d) + "\" }");
                         },
                         toolCallsOut);
@@ -2369,7 +2394,7 @@ namespace AgentWeb
                     }
 
                     string final = resp.Content;
-                    ctx.Messages.Add(Msg("assistant", final, turnSteps));
+                    ctx.Messages.Add(Msg("assistant", final, turnSteps, ThinkOf(cfg, turnThink)));
                     if (emit != null) emit("done", "{ \"session\" : \"" + Escape(ctx.Id) + "\" }");
                     return;
                 }
@@ -2428,6 +2453,8 @@ namespace AgentWeb
 
             LlmResp r = new LlmResp();
             r.Content = msg.ContainsKey("content") ? Json.AsString(msg["content"]) : "";
+            if (msg.ContainsKey("reasoning_content")) r.Reasoning = Json.AsString(msg["reasoning_content"]);
+            else if (msg.ContainsKey("reasoning"))     r.Reasoning = Json.AsString(msg["reasoning"]);
 
             // usage を取得(トークン実測。プロキシが返さなければ 0)
             if (root.ContainsKey("usage") && root["usage"] is Dictionary<string, object>)
@@ -2488,6 +2515,7 @@ namespace AgentWeb
         public List<object> ToolCalls;     // Dictionary<string,object> の List
         public int TotalTokens;            // usage.total_tokens (プロキシが返せば)
         public int PromptTokens;           // usage.prompt_tokens
+        public string Reasoning;           // reasoning_content (思考。セッションに保存してリロード後も表示する)
     }
 
     // ------------------------------------------------------------------------

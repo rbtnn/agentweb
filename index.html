@@ -871,15 +871,29 @@ function userMsg(text, ts) {
   var el = bubble("user", escapeHtml(text), ts || fmtNow(), text);
   return el;
 }
-function assistantMsg(md, ts, steps) {
+function assistantMsg(md, ts, steps, think) {
   var el = bubble("assistant", '<div class="md">' + renderMarkdown(md) + '</div>', ts || fmtNow(), md);
+  var mdEl = el.querySelector(".md");
   var html = progressHtml(steps);   // 保存されたツール実行記録(リロード後も表示)
   if (html) {
-    var mdEl = el.querySelector(".md");
     var pb = document.createElement("div");
     pb.className = "progress";
     pb.innerHTML = html;
     el.insertBefore(pb, mdEl);
+  }
+  // 保存された思考(reasoning)を復元する。ライブ表示と同じ見た目にする
+  if (think != null && String(think).length > 0) {
+    var det = document.createElement("details");
+    det.className = "think";
+    det.open = true;
+    var sum = document.createElement("summary");
+    sum.textContent = "Thinking...";
+    var tb = document.createElement("div");
+    tb.className = "think-body";
+    tb.textContent = String(think);   // textContent で安全に(改行は CSS の pre-wrap で保持)
+    det.appendChild(sum);
+    det.appendChild(tb);
+    el.insertBefore(det, mdEl);
   }
   return el;
 }
@@ -1031,10 +1045,13 @@ function loadSession(messages) {
   emptyState(false); hasMessages = true;
   messages.forEach(function(m){
     if (m.role === "user") userMsg(m.content, m.ts);
-    else if (m.role === "assistant") assistantMsg(m.content, m.ts, m.steps);
+    else if (m.role === "assistant") assistantMsg(m.content, m.ts, m.steps, m.think);
   });
   if (serverBusy) ensureTyping();
   scrollBottom();
+  // 履歴の思考ブロックは最新部分(最下部)を表示しておく
+  var tbs = chatEl.querySelectorAll(".think-body");
+  for (var ti = 0; ti < tbs.length; ti++) tbs[ti].scrollTop = tbs[ti].scrollHeight;
 }
 
 function fetchSession(id) {
