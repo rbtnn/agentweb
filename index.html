@@ -162,7 +162,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .session-item .s-del, .session-item .s-ren, .session-item .s-auto {
+  .session-item .s-del, .session-item .s-ren, .session-item .s-auto, .session-item .s-new {
     flex: none;
     width: 20px; height: 20px;
     border: none;
@@ -174,10 +174,11 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     display: grid; place-items: center;
     opacity: 0;
   }
-  .session-item:hover .s-del, .session-item:hover .s-ren, .session-item:hover .s-auto { opacity: 1; }
+  .session-item:hover .s-del, .session-item:hover .s-ren, .session-item:hover .s-auto, .session-item:hover .s-new { opacity: 1; }
   .session-item .s-del:hover { background: var(--panel-2); color: var(--danger); }
   .session-item .s-ren:hover { background: var(--panel-2); color: var(--accent); }
   .session-item .s-auto:hover { background: var(--panel-2); color: var(--accent); }
+  .session-item .s-new:hover { background: var(--panel-2); color: var(--accent); }
   .session-item .s-auto:disabled { opacity: 1; cursor: progress; }
   .session-item .s-edit {
     flex: 1; min-width: 0;
@@ -386,47 +387,53 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   /* ---------- セッション欄（settings ボタンの右側） ---------- */
   .sess-panel {
     display: flex;
-    align-items: stretch;
+    align-items: center;
     gap: 6px;
-    flex: 1 1 240px;
+    flex: 1 1 200px;
     min-width: 0;
-    max-width: 460px;
+    max-width: 420px;
   }
-  .sess-listbox {
+  /* ドロップダウン（サイドバーと同じ配色） */
+  .sess-select {
     flex: 1 1 auto;
     min-width: 0;
-    height: 62px;          /* 約3件分を表示し、残りはスクロール */
-    overflow-y: auto;
-    background: var(--bg);
+    height: 26px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 2px;
-  }
-  .sess-listbox::-webkit-scrollbar { width: 8px; }
-  .sess-listbox::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-  .sess-opt {
-    padding: 2px 7px;
-    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
     font-size: 11px;
-    line-height: 1.7;
-    color: var(--muted);
+    padding: 0 4px;
     cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    outline: none;
   }
-  .sess-opt:hover { background: var(--panel-2); color: var(--text); }
-  .sess-opt.sel { background: var(--panel-3); color: var(--accent); }
-  .sess-actions {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
+  .sess-select:hover { background: var(--panel-2); }
+  .sess-select:focus { border-color: var(--accent); }
+  .sess-select option { background: var(--bg); color: var(--text); }
+  /* ボタンはサイドバーと同じアイコンボタン（常時表示） */
+  .sess-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+  .sess-actions .s-auto,
+  .sess-actions .s-del,
+  .sess-actions .s-new {
     flex: none;
+    width: 22px; height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit; font-size: 14px; line-height: 1;
+    cursor: pointer;
+    display: grid; place-items: center;
+    opacity: 1;            /* サイドバーは hover で出すが、ここは常時表示 */
   }
-  .sess-btn { font-size: 11px; padding: 3px 8px; white-space: nowrap; }
-  .sess-btn:disabled { opacity: .45; cursor: default; }
-  .sess-btn:disabled:hover { background: var(--bg); color: var(--muted); }
+  .sess-actions .s-auto:hover { background: var(--panel-2); color: var(--accent); }
+  .sess-actions .s-del:hover { background: var(--panel-2); color: var(--danger); }
+  .sess-actions .s-new:hover { background: var(--panel-2); color: var(--accent); }
+  .sess-actions .s-auto:disabled,
+  .sess-actions .s-del:disabled { opacity: .4; cursor: default; background: transparent; color: var(--muted); }
+  .sess-actions .s-auto:disabled:hover,
+  .sess-actions .s-del:disabled:hover { background: transparent; color: var(--muted); }
   .sidebar.hidden { display: none; }
   .side-actions { display: flex; gap: 4px; align-items: center; }
   .composer-left { display: flex; flex-direction: column; gap: 4px; flex: none; padding-bottom: 4px; }
@@ -614,7 +621,6 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
 
   @media (max-width: 980px) {
     .sess-panel { max-width: none; flex-basis: 100%; }
-    .sess-actions { flex-direction: row; }
   }
   @media (max-width: 700px) {
     .modal-body { grid-template-columns: 1fr; }
@@ -666,11 +672,11 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
       <button type="button" class="theme-link" id="themeBtn" title="テーマ切替">colorscheme dark</button>
       <button type="button" class="theme-link" id="settingsBtn" title="設定">⚙ settings</button>
       <div class="sess-panel">
-        <div class="sess-listbox" id="settingsSessionList" role="listbox" aria-label="セッション一覧" tabindex="0"></div>
+        <select class="sess-select" id="settingsSessionList" title="セッションを選択" aria-label="セッション一覧"></select>
         <div class="sess-actions">
-          <button type="button" class="theme-link sess-btn" id="settingsAutotitle" title="会話内容から名前を自動設定">自動設定</button>
-          <button type="button" class="theme-link sess-btn" id="settingsDelete" title="選択したセッションを削除">セッション削除</button>
-          <button type="button" class="theme-link sess-btn" id="settingsNew" title="新しいセッションを作成">新規セッション</button>
+          <button type="button" class="s-auto" id="settingsAutotitle" title="会話内容から名前を自動設定">⟳</button>
+          <button type="button" class="s-del" id="settingsDelete" title="このセッションを削除">×</button>
+          <button type="button" class="s-new" id="settingsNew" title="新しいセッションを作成">＋</button>
         </div>
       </div>
     </div>
@@ -1648,7 +1654,7 @@ function openSettings(){
 
 function closeSettings(){ settingsModal.style.display = "none"; }
 
-/* ---------- 画面下部 (settings ボタンの右側): セッションのリストボックスと操作 ---------- */
+/* ---------- 画面下部 (settings ボタンの右側): セッションのドロップダウンと操作 ---------- */
 
 function updateSessButtons(){
   if (!sessAutotitle || !sessDeleteBtn) return;
@@ -1666,28 +1672,18 @@ function renderSettingsSessions(sessions, selected){
   sessSelId = selected || "";
   sessListBox.innerHTML = "";
   sessions.forEach(function(s){
-    var o = document.createElement("div");
-    o.className = "sess-opt" + (s.id === sessSelId ? " sel" : "");
-    o.setAttribute("role", "option");
-    o.setAttribute("aria-selected", s.id === sessSelId ? "true" : "false");
-    o.setAttribute("data-id", s.id);
-    o.title = s.title || "会話";
+    var o = document.createElement("option");
+    o.value = s.id;
     o.textContent = (s.title || "会話") + ((s.count || 0) > 0 ? " · " + s.count : "");
-    o.addEventListener("click", function(){ pickSettingsSession(s.id); });
     sessListBox.appendChild(o);
   });
+  if (sessSelId) sessListBox.value = sessSelId;
   updateSessButtons();
 }
 
-// リストボックスの選択を付け替え、会話もそのセッションへ切り替える
+// ドロップダウンの選択を確定し、会話もそのセッションへ切り替える
 function pickSettingsSession(id){
   sessSelId = id;
-  var opts = sessListBox.querySelectorAll(".sess-opt");
-  for (var i = 0; i < opts.length; i++) {
-    var on = (opts[i].getAttribute("data-id") === id);
-    if (on) opts[i].classList.add("sel"); else opts[i].classList.remove("sel");
-    opts[i].setAttribute("aria-selected", on ? "true" : "false");
-  }
   updateSessButtons();
   selectSession(id);   // 実行中(busy)の時は切り替わらない
 }
@@ -1712,6 +1708,10 @@ function refreshSettingsSessions(selected){
     })
     .catch(function(){});
 }
+
+sessListBox.addEventListener("change", function(){
+  pickSettingsSession(sessListBox.value);
+});
 
 sessAutotitle.addEventListener("click", function(){
   if (!sessSelId) return;
