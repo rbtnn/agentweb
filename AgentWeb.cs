@@ -1545,6 +1545,27 @@ namespace AgentWeb
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
         }
 
+        // JSON 文字列用のエスケープ(制御文字 < 0x20 も \u00XX にする)
+        static string JsonEscape(string s)
+        {
+            if (s == null) return "";
+            StringBuilder sb = new StringBuilder(s.Length + 8);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == '\\') sb.Append("\\\\");
+                else if (c == '"') sb.Append("\\\"");
+                else if (c == '\n') sb.Append("\\n");
+                else if (c == '\r') sb.Append("\\r");
+                else if (c == '\t') sb.Append("\\t");
+                else if (c == '\b') sb.Append("\\b");
+                else if (c == '\f') sb.Append("\\f");
+                else if (c < ' ') sb.Append("\\u").Append(((int)c).ToString("x4"));
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
         static string ArgStr(Dictionary<string, object> a, string k)
         {
             if (a != null && a.ContainsKey(k)) return Json.AsString(a[k]);
@@ -1884,11 +1905,11 @@ namespace AgentWeb
                     LlmResp resp = CallOnceStream(cfg, eff, cfg.AllowTools,
                         delegate (string d)
                         {
-                            if (emit != null) emit("content", "{ \"t\" : \"" + Escape(d) + "\" }");
+                            if (emit != null) emit("content", "{ \"t\" : \"" + JsonEscape(d) + "\" }");
                         },
                         delegate (string d)
                         {
-                            if (emit != null) emit("reasoning", "{ \"t\" : \"" + Escape(d) + "\" }");
+                            if (emit != null) emit("reasoning", "{ \"t\" : \"" + JsonEscape(d) + "\" }");
                         },
                         toolCallsOut);
                     if (resp.TotalTokens > 0) ctx.LastTotalTokens = resp.TotalTokens;
@@ -1917,7 +1938,7 @@ namespace AgentWeb
                             if (fn != null && name.Length > 0) fn["name"] = name;
                             string tdetail = ToolDetail(name, argsJson);
                             AgentProgress.Add("ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
-                            if (emit != null) emit("tool", "{ \"name\" : \"" + Escape(name) + "\", \"detail\" : \"" + Escape(tdetail) + "\" }");
+                            if (emit != null) emit("tool", "{ \"name\" : \"" + JsonEscape(name) + "\", \"detail\" : \"" + JsonEscape(tdetail) + "\" }");
                             string result;
                             try { result = ToolExecutor.Execute(name, argsJson, cfg); }
                             catch (Exception ex) { result = "{\"error\": \"" + Escape(ex.Message) + "\"}"; }

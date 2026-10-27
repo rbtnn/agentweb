@@ -993,6 +993,7 @@ function send() {
       return reader.read().then(function(res){
         if (res.done) { paint(true); return; }
         buf += decoder.decode(res.value, {stream:true});
+        buf = buf.replace(/\r\n/g, "\n");   // サーバは CRLF で送出するため LF に正規化
         var idx;
         while ((idx = buf.indexOf("\n\n")) >= 0) {
           var block = buf.slice(0, idx); buf = buf.slice(idx + 2);
