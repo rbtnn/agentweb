@@ -769,6 +769,7 @@ function updateToolsBadge() {
 }
 var connEl = document.getElementById("conn");
 var modelEl = document.getElementById("modelLabel");
+var thinkBodyRef = null;   // 生成中の思考本文 (.think-body)。内部スクロールを追従させるため参照を保持
 
 function emptyState(show) {
   if (show) {
@@ -896,6 +897,8 @@ function addTyping() {
 function scrollBottom() {
   var m = document.getElementById("main");
   m.scrollTop = m.scrollHeight;
+  // 思考本文は max-height で内部スクロールするため、そちらも最下部へ追従させる
+  if (thinkBodyRef) thinkBodyRef.scrollTop = thinkBodyRef.scrollHeight;
   runMermaid();
 }
 function resizeInput() {
@@ -1022,6 +1025,7 @@ function deleteSession(id, title) {
 // 取得済みメッセージ [{role,content},...] を表示に反映
 function loadSession(messages) {
   hasMessages = false;
+  thinkBodyRef = null;          // 会話を作り直すので思考本文への参照も解除
   chatEl.innerHTML = "";
   if (!messages || messages.length === 0) { emptyState(true); return; }
   emptyState(false); hasMessages = true;
@@ -1226,6 +1230,7 @@ function send() {
   setBusy(true);
   connEl.textContent = "応答中…"; connEl.style.color = "#fbbf24";
 
+  thinkBodyRef = null;                            // 前のターンの思考本文への参照を解除
   var bubbleEl = assistantMsg("");                // 空の assistant 吹き出し
   var mdEl = bubbleEl.querySelector(".md");
   var prog = document.createElement("div");       // ツール実行の表示(思考ブロックの外・吹き出し上部)
@@ -1284,6 +1289,7 @@ function send() {
     thinkEl.appendChild(sum);
     thinkEl.appendChild(thinkBody);
     bubbleEl.insertBefore(thinkEl, mdEl);
+    thinkBodyRef = thinkBody;   // scrollBottom() から追従できるようにする
   }
 
   var fullText = "";
