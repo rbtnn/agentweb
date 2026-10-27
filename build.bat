@@ -35,16 +35,29 @@ if not defined CSC (
     exit /b 1
 )
 
-rem --- AgentWeb.cs と index.html の整合性チェック (Python があれば) ---
-where python >nul 2>nul
-if %errorlevel% equ 0 (
-    python check_consistency.py
+rem --- AgentWeb.cs と index.html の整合性チェック (Python が使える場合のみ) ---
+rem   Python が無い / 実行できない(Store 版のスタブ等)場合はスキップしてビルドを続行します。
+set "PY="
+where py >nul 2>nul
+if !errorlevel! equ 0 (
+    py -3 -c "import sys" >nul 2>nul
+    if !errorlevel! equ 0 set "PY=py -3"
+)
+if not defined PY (
+    where python >nul 2>nul
+    if !errorlevel! equ 0 (
+        python -c "import sys" >nul 2>nul
+        if !errorlevel! equ 0 set "PY=python"
+    )
+)
+if defined PY (
+    !PY! check_consistency.py
     if !errorlevel! neq 0 (
         echo [ERROR] AgentWeb.cs と index.html の整合性チェックに失敗しました。
         exit /b 1
     )
 ) else (
-    echo [WARN] python が見つからないため整合性チェックをスキップします。
+    echo [WARN] Python が見つからないため整合性チェックをスキップします。
 )
 
 echo [0/1] Using csc: %CSC%
