@@ -379,6 +379,12 @@ namespace AgentWeb
                 if (rid.EndsWith("/rename")) rid = rid.Substring(0, rid.Length - "/rename".Length);
                 return HandleRenameSession(req, rid);
             }
+            if (req.Method == "POST" && path.StartsWith("/api/sessions/") && path.EndsWith("/autotitle"))
+            {
+                string aid = path.Substring("/api/sessions/".Length);
+                if (aid.EndsWith("/autotitle")) aid = aid.Substring(0, aid.Length - "/autotitle".Length);
+                return HandleAutoTitle(aid);
+            }
             if (req.Method == "POST" && path == "/api/chat")
                 return HandleChat(req);
             if (req.Method == "POST" && path == "/api/cancel")
@@ -824,6 +830,99 @@ namespace AgentWeb
             d["session"] = id;
             d["title"] = (title.Trim().Length == 0) ? "新規会話" : title.Trim();
             return JsonResponse(200, d);
+        }
+
+        // ---------------- セッション名の自動設定 ----------------
+        HttpResponse HandleAutoTitle(string id)
+        {
+            if (busy)
+                return JsonResponse(409, MakeError("busy", "応答中は名前を自動設定できません"));
+
+            List<object> messages = null;
+            string summary = "";
+            int ctxStart = 0;
+            lock (sessionLock)
+            {
+                Dictionary<string, object> meta = store.Load(id);
+                if (meta == null)
+                    return JsonResponse(404, MakeError("not_found", "セッションが見つかりません"));
+                summary = meta.ContainsKey("summary") ? Json.AsString(meta["summary"]) : "";
+                ctxStart = meta.ContainsKey("contextStart") ? Json.AsInt(meta["contextStart"]) : 0;
+                object ms = meta.ContainsKey("messages") ? meta["messages"] : null;
+                if (ms is List<object>) messages = (List<object>)ms;
+            }
+
+            if (messages == null || messages.Count == 0)
+                return JsonResponse(400, MakeError("empty", "会話がまだありません"));
+
+            string source = TitleSourceText(messages, summary);
+            string sys = "あなたは会話ログに短いタイトルを付けるアシスタントです。"
+                       + "会話全体の主題を表す簡潔なタイトルを1つだけ出力してください。"
+                       + "出力はタイトル文字列のみとし、説明・前置き・引用符・句点・コードブロックは禁止です。"
+                       + "日本語で20文字以内を目安にしてください。";
+
+            string title;
+            try { title = LlmClient.CompleteText(config, sys, source); }
+            catch (Exception ex) { return JsonResponse(502, MakeError("llm_error", "タイトル生成に失敗しました: " + ex.Message)); }
+
+            title = SanitizeTitle(title);
+            if (title.Length == 0)
+                return JsonResponse(502, MakeError("llm_error", "タイトルを生成できませんでした"));
+
+            lock (sessionLock)
+            {
+                store.Save(id, messages, title, summary, ctxStart);
+            }
+
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["ok"] = true;
+            d["session"] = id;
+            d["title"] = title;
+            return JsonResponse(200, d);
+        }
+
+        // タイトル生成用に会話ログを短くまとめる(直近 12 件 + 要約)
+        static string TitleSourceText(List<object> messages, string summary)
+        {
+            StringBuilder sb = new StringBuilder();
+            if (summary != null && summary.Trim().Length > 0)
+                sb.Append("これまでの要約:\n").Append(summary.Trim()).Append("\n\n");
+            int start = Math.Max(0, messages.Count - 12);
+            for (int i = start; i < messages.Count; i++)
+            {
+                Dictionary<string, object> m = messages[i] as Dictionary<string, object>;
+                if (m == null) continue;
+                string role = m.ContainsKey("role") ? Json.AsString(m["role"]) : "";
+                string content = m.ContainsKey("content") ? Json.AsString(m["content"]) : "";
+                if (content.Trim().Length == 0) continue;
+                string label = (role == "user") ? "ユーザー" : ((role == "assistant") ? "アシスタント" : "ツール");
+                string c = content.Trim();
+                if (c.Length > 400) c = c.Substring(0, 400) + "…";
+                sb.Append(label).Append(": ").Append(c).Append("\n");
+            }
+            return sb.ToString();
+        }
+
+        // LLM 出力をタイトル文字列に整形する
+        static string SanitizeTitle(string s)
+        {
+            if (s == null) return "";
+            s = s.Replace("```", " ").Trim();
+            int nl = s.IndexOf('\n');
+            if (nl >= 0) s = s.Substring(0, nl);
+            s = s.Trim();
+            string[] prefixes = new string[] { "タイトル:", "タイトル：", "Title:", "title:" };
+            for (int i = 0; i < prefixes.Length; i++)
+            {
+                if (s.StartsWith(prefixes[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    s = s.Substring(prefixes[i].Length).Trim();
+                    break;
+                }
+            }
+            s = s.Trim('"', '\'', '「', '」', '『', '』', '*', '#', ' ', '\t', '\r', '。', '：', ':');
+            if (s.Length > 40) s = s.Substring(0, 40) + "…";
+            return s;
         }
 
         // ---------------- リクエスト読み取り ----------------
@@ -1528,6 +1627,16 @@ namespace AgentWeb
             m["content"] = content;
             m["ts"] = DateTime.Now.ToString("yyyy/MM/dd HH:mm");
             return m;
+        }
+
+        // 単発のテキスト生成(セッション名の自動生成など)を外部から呼ぶための公開ラッパ
+        public static string CompleteText(Config cfg, string systemPrompt, string userText)
+        {
+            List<object> msgs = new List<object>();
+            msgs.Add(Msg("system", systemPrompt));
+            msgs.Add(Msg("user", userText));
+            LlmResp r = CallOnce(cfg, msgs, false);
+            return (r == null) ? "" : r.Content;
         }
 
         static Dictionary<string, object> ToolMsg(string id, string name, string result)

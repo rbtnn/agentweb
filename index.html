@@ -138,7 +138,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .session-item .s-del, .session-item .s-ren {
+  .session-item .s-del, .session-item .s-ren, .session-item .s-auto {
     flex: none;
     width: 20px; height: 20px;
     border: none;
@@ -150,9 +150,11 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     display: grid; place-items: center;
     opacity: 0;
   }
-  .session-item:hover .s-del, .session-item:hover .s-ren { opacity: 1; }
+  .session-item:hover .s-del, .session-item:hover .s-ren, .session-item:hover .s-auto { opacity: 1; }
   .session-item .s-del:hover { background: var(--panel-3); color: var(--danger); }
   .session-item .s-ren:hover { background: var(--panel-3); color: var(--accent); }
+  .session-item .s-auto:hover { background: var(--panel-3); color: var(--accent); }
+  .session-item .s-auto:disabled { opacity: 1; cursor: progress; }
   .session-item .s-edit {
     flex: 1; min-width: 0;
     width: 100%;
@@ -697,6 +699,15 @@ function renderSessionList(sessions, selected) {
       startRename(s.id, s.title || "", item, txt);
     });
 
+    var auto = document.createElement("button");
+    auto.className = "s-auto";
+    auto.title = "会話内容から名前を自動設定";
+    auto.textContent = "⟳";
+    auto.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      autoTitle(s.id, auto);
+    });
+
     var del = document.createElement("button");
     del.className = "s-del";
     del.title = "このセッションを削除";
@@ -707,6 +718,7 @@ function renderSessionList(sessions, selected) {
     });
 
     item.appendChild(txt);
+    item.appendChild(auto);
     item.appendChild(ren);
     item.appendChild(del);
     sessionListEl.appendChild(item);
@@ -736,6 +748,21 @@ function startRename(id, currentTitle, item, txt) {
     else if (e.key === "Escape") { refreshSessions(); }
   });
   input.addEventListener("blur", commit);
+}
+
+// 会話内容からセッション名を自動設定
+function autoTitle(id, btn) {
+  if (!id) return;
+  var prev = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  fetch("/api/sessions/" + encodeURIComponent(id) + "/autotitle", { method: "POST" })
+    .then(function(r){ return r.json().catch(function(){ return null; }); })
+    .then(function(d){
+      if (d && d.ok) { refreshSessions(); }
+      else { alert("名前の自動設定に失敗しました: " + ((d && (d.message || d.error)) || "不明なエラー")); }
+    })
+    .catch(function(){ alert("名前の自動設定に失敗しました(通信エラー)"); })
+    .then(function(){ if (btn) { btn.disabled = false; btn.textContent = prev || "⟳"; } });
 }
 
 function deleteSession(id, title) {
