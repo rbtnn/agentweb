@@ -46,8 +46,19 @@ build.bat
 
 ## 設定（agentweb.json）
 
-実行時に、**`aw.exe` と同じフォルダの `agentweb.json`** を読み込みます（無ければ環境変数/既定値）。
-`agentweb.json.example` を `agentweb.json` にコピーして編集してください。
+設定ファイルは **セッションと同じ場所** に置かれます（無ければ環境変数/既定値）。
+
+```
+%APPDATA%\agentweb\agentweb.json          ← 設定
+%APPDATA%\agentweb\sessions\<id>.json    ← セッション
+```
+
+- 旧バージョンで `aw.exe` と同じフォルダに置いていた `agentweb.json` は、
+  初回起動時に自動で新しい場所へ移行されます（新しい場所にファイルが無い場合のみ）。
+- 旧配置（`aw.exe` と同じフォルダ）のファイルは、**新しい場所にファイルが無い場合のみ**読み込まれます。
+- **Web 画面の `⚙ settings` から編集・保存できます**（保存後は即時反映。ポート変更のみ再起動が必要）。
+
+`agentweb.json.example` は設定項目のサンプルです。
 
 ```json
 {
@@ -202,6 +213,16 @@ curl http://localhost:8000/api/diag/tools
 - API/プロキシが `tools` を無視している（社内プロキシで落とされている等）
 
 リクエストには `tools` と `tool_choice: "auto"` を送信しています。
+
+## 設定画面（Web UI）
+
+画面下部の **`⚙ settings`** ボタンで設定モーダルを開き、`agentweb.json` の内容を
+ブラウザから編集・保存できます（デザインは Pi Web のモーダルに合わせています）。
+
+- 保存先のパス（`%APPDATA%\agentweb\agentweb.json`）はモーダル下部に表示されます
+- 保存は `POST /api/config`、取得は `GET /api/config`
+- 表示は localhost のみですが、API キーも画面に表示されます（`type="password"`）
+- `allowTools`（tools バッジ）の切替も設定ファイルへ保存されます
 
 ## セッション管理（Windows AppData に永続化）
 

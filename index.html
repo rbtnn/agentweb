@@ -19,14 +19,15 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Noto Sans Mono", monospace;
 
+    /* Pi Web と同じ変数名 */
     --bg: #1a1a1a;
-    --panel: #242424;          /* --bg-panel */
-    --panel-2: #2e2e2e;        /* --bg-hover */
-    --panel-3: #383838;        /* --bg-selected */
+    --bg-panel: #242424;
+    --bg-hover: #2e2e2e;
+    --bg-selected: #383838;
     --border: #3a3a3a;
     --text: #e8e8e8;
-    --muted: #9ca3af;
-    --dim: #6b7280;
+    --text-muted: #9ca3af;
+    --text-dim: #6b7280;
     --accent: #60a5fa;
     --accent-hover: #93c5fd;
     --accent-dim: #1c3a5e;
@@ -35,6 +36,12 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     --subtle: rgba(255,255,255,.04);
     --danger: #f87171;
     --radius: 8px;
+    /* 旧名 (エイリアス) */
+    --panel: var(--bg-panel);
+    --panel-2: var(--bg-hover);
+    --panel-3: var(--bg-selected);
+    --muted: var(--text-muted);
+    --dim: var(--text-dim);
 
     background: var(--bg);
     color: var(--text);
@@ -42,13 +49,13 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   :root[data-theme="light"] {
     color-scheme: light;
     --bg: #ffffff;
-    --panel: #f5f5f5;
-    --panel-2: #eeeeee;
-    --panel-3: #e8e8e8;
+    --bg-panel: #f5f5f5;
+    --bg-hover: #eeeeee;
+    --bg-selected: #e8e8e8;
     --border: #e0e0e0;
     --text: #1a1a1a;
-    --muted: #6b7280;
-    --dim: #9ca3af;
+    --text-muted: #6b7280;
+    --text-dim: #9ca3af;
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
     --accent-dim: #dbeafe;
@@ -459,7 +466,116 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   }
   .fab:hover { opacity: 1; }
 
+  /* ---------- 設定モーダル (Pi Web のモーダルに合わせた見た目) ---------- */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0,0,0,.5);
+    display: grid;
+    place-items: center;
+    padding: 16px;
+  }
+  .modal {
+    width: min(760px, 96vw);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  }
+  .modal-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+  .modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+  .modal-body {
+    padding: 16px 18px;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .field.full { grid-column: 1 / -1; }
+  .field > label { font-size: 12px; color: var(--text-muted); }
+  .field input[type="text"],
+  .field input[type="password"],
+  .field input[type="number"],
+  .field textarea {
+    width: 100%;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 9px;
+    outline: none;
+  }
+  .field input:focus, .field textarea:focus { border-color: var(--accent); }
+  .field textarea {
+    min-height: 130px;
+    resize: vertical;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .field.bool { flex-direction: row; align-items: center; gap: 8px; }
+  .field.bool input { width: 15px; height: 15px; accent-color: var(--accent); }
+  .modal-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    flex: none;
+  }
+  .modal-hint {
+    flex: 1; min-width: 0;
+    font-size: 11px; color: var(--text-dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .btn {
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--bg-hover); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0b1220;
+    font-weight: 600;
+  }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  :root[data-theme="light"] .btn.primary { color: #ffffff; }
+  .icon-btn {
+    width: 28px; height: 28px;
+    border: none; border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 16px; line-height: 1;
+    cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
   @media (max-width: 700px) {
+    .modal-body { grid-template-columns: 1fr; }
     .layout { flex-direction: column; }
     .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
     .session-list { display: flex; flex-wrap: nowrap; overflow-x: auto; padding: 6px; }
@@ -505,8 +621,25 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
       <span class="badge">model <b id="modelLabel">—</b></span>
       <button type="button" class="badge tools-toggle" id="toolsBadge" title="ツール実行を切り替え">tools —</button>
       <button type="button" class="theme-link" id="themeBtn" title="テーマ切替">colorscheme dark</button>
+      <button type="button" class="theme-link" id="settingsBtn" title="設定">⚙ settings</button>
     </div>
   </footer>
+
+  <!-- 設定モーダル -->
+  <div class="modal-overlay" id="settingsModal" style="display:none">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="設定">
+      <div class="modal-head">
+        <div class="modal-title">Settings</div>
+        <button type="button" class="icon-btn" id="settingsClose" title="閉じる" style="margin-left:auto">×</button>
+      </div>
+      <div class="modal-body" id="settingsBody"></div>
+      <div class="modal-foot">
+        <span class="modal-hint" id="settingsHint"></span>
+        <button type="button" class="btn" id="settingsCancel">Cancel</button>
+        <button type="button" class="btn primary" id="settingsSave">Save</button>
+      </div>
+    </div>
+  </div>
 
 <script>
 "use strict";
@@ -1303,6 +1436,128 @@ document.getElementById("sideClose").addEventListener("click", function(){ apply
   });
   applyIcon();
 })();
+
+
+/* ---------- 設定 (Web UI から agentweb.json を編集) ---------- */
+var SETTINGS_FIELDS = [
+  { k:"model",            label:"Model",                type:"text" },
+  { k:"llmApiUrl",        label:"LLM API URL",          type:"text", full:true },
+  { k:"llmApiKey",        label:"API Key",              type:"password", full:true },
+  { k:"allowTools",       label:"Allow tools",          type:"bool" },
+  { k:"emitReasoning",    label:"Emit reasoning",       type:"bool" },
+  { k:"maxToolsPerTurn",  label:"Max tools / turn",     type:"number" },
+  { k:"toolTimeoutSec",   label:"Tool timeout (sec)",   type:"number" },
+  { k:"contextWindow",    label:"Context window",       type:"number" },
+  { k:"reserveTokens",    label:"Reserve tokens",       type:"number" },
+  { k:"keepRecentTokens", label:"Keep recent tokens",   type:"number" },
+  { k:"useSystemProxy",   label:"Use system proxy",     type:"bool" },
+  { k:"proxyUrl",         label:"Proxy URL",            type:"text", full:true },
+  { k:"proxyUser",        label:"Proxy user",           type:"text" },
+  { k:"proxyPass",        label:"Proxy password",       type:"password" },
+  { k:"port",             label:"Port (要再起動)",        type:"number" },
+  { k:"openBrowserOnStart", label:"Open browser on start", type:"bool" },
+  { k:"bindPath",         label:"Bind path (静的ファイル)", type:"text", full:true },
+  { k:"systemPrompt",     label:"System prompt",        type:"textarea", full:true }
+];
+
+var settingsEls = {};
+var settingsModal = document.getElementById("settingsModal");
+var settingsBody = document.getElementById("settingsBody");
+var settingsHint = document.getElementById("settingsHint");
+var settingsOriginPort = null;
+
+(function buildSettingsForm(){
+  SETTINGS_FIELDS.forEach(function(f){
+    var wrap = document.createElement("div");
+    wrap.className = "field" + (f.full ? " full" : "") + (f.type === "bool" ? " bool" : "");
+    var el;
+    if (f.type === "textarea") {
+      el = document.createElement("textarea");
+    } else {
+      el = document.createElement("input");
+      el.type = (f.type === "bool") ? "checkbox" : f.type;
+    }
+    el.id = "set_" + f.k;
+    if (f.type === "bool") {
+      // チェックボックスは先に置き、ラベルを横に並べる
+      wrap.appendChild(el);
+      var lb = document.createElement("label");
+      lb.htmlFor = el.id;
+      lb.textContent = f.label;
+      wrap.appendChild(lb);
+    } else {
+      var lb2 = document.createElement("label");
+      lb2.htmlFor = el.id;
+      lb2.textContent = f.label;
+      wrap.appendChild(lb2);
+      wrap.appendChild(el);
+    }
+    settingsBody.appendChild(wrap);
+    settingsEls[f.k] = el;
+  });
+})();
+
+function openSettings(){
+  fetch("/api/config")
+    .then(function(r){ return r.json().catch(function(){ return null; }); })
+    .then(function(d){
+      if (!d || !d.ok) { alert("設定の取得に失敗しました"); return; }
+      var c = d.config || {};
+      SETTINGS_FIELDS.forEach(function(f){
+        var el = settingsEls[f.k];
+        var v = c[f.k];
+        if (f.type === "bool") el.checked = !!v;
+        else el.value = (v == null) ? "" : String(v);
+      });
+      settingsOriginPort = c.port;
+      settingsHint.textContent = d.path ? ("保存先: " + d.path) : "";
+      settingsModal.style.display = "grid";
+    })
+    .catch(function(){ alert("設定の取得に失敗しました(通信エラー)"); });
+}
+
+function closeSettings(){ settingsModal.style.display = "none"; }
+
+function saveSettings(){
+  var body = {};
+  SETTINGS_FIELDS.forEach(function(f){
+    var el = settingsEls[f.k];
+    if (f.type === "bool") body[f.k] = el.checked;
+    else if (f.type === "number") body[f.k] = parseInt(el.value, 10) || 0;
+    else body[f.k] = el.value;
+  });
+  var btn = document.getElementById("settingsSave");
+  btn.disabled = true;
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })
+    .then(function(r){ return r.json().catch(function(){ return null; }); })
+    .then(function(d){
+      btn.disabled = false;
+      if (!d || !d.ok) { alert("設定の保存に失敗しました: " + ((d && d.message) || "不明なエラー")); return; }
+      closeSettings();
+      // ツール可否は即時反映されるのでバッジを更新
+      if (d.config && typeof d.config.allowTools === "boolean") {
+        allowTools = d.config.allowTools;
+        updateToolsBadge();
+      }
+      if (settingsOriginPort != null && d.config && d.config.port !== settingsOriginPort) {
+        alert("ポート番号を変更しました。反映には agentweb.exe の再起動が必要です。");
+      }
+    })
+    .catch(function(){ btn.disabled = false; alert("設定の保存に失敗しました(通信エラー)"); });
+}
+
+document.getElementById("settingsBtn").addEventListener("click", openSettings);
+document.getElementById("settingsClose").addEventListener("click", closeSettings);
+document.getElementById("settingsCancel").addEventListener("click", closeSettings);
+document.getElementById("settingsSave").addEventListener("click", saveSettings);
+settingsModal.addEventListener("click", function(e){ if (e.target === settingsModal) closeSettings(); });
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape" && settingsModal.style.display !== "none") closeSettings();
+});
 
 /* ---------- init ---------- */
 resizeInput();

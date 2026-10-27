@@ -161,45 +161,114 @@ namespace AgentWeb
             ApplyConfigFile();
         }
 
-        // 設定ファイル(agentweb.json)から上書き適用する
-        // 既定は実行ディレクトリの agentweb.json。優先度: 環境変数 < 設定ファイル
+        // 設定ファイル(agentweb.json)から上書き適用する。
+        // 保存先はセッションと同じ %APPDATA%\agentweb\agentweb.json。
+        // 旧配置(実行ディレクトリ)にしか無い場合は一度だけ移行する。
+        // 優先度: 環境変数 < 設定ファイル
         void ApplyConfigFile()
         {
             string path = ConfigPath;
             if (path == null || path.Trim().Length == 0)
             {
-                try { path = Path.Combine(AppDir(), "agentweb.json"); } catch { path = "agentweb.json"; }
+                path = DefaultConfigPath();
+                try
+                {
+                    string oldPath = Path.Combine(AppDir(), "agentweb.json");
+                    if (!File.Exists(path) && File.Exists(oldPath))
+                    {
+                        string dir = Path.GetDirectoryName(path);
+                        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                        File.Copy(oldPath, path, true);
+                        Console.WriteLine("[config] 設定ファイルを移行しました: " + oldPath + " → " + path);
+                    }
+                }
+                catch { }
             }
+            ConfigPath = path;               // ファイルが無くても保存先として確定しておく
             if (!File.Exists(path)) return;
-            ConfigPath = path;
 
             try
             {
                 object o = Json.Parse(File.ReadAllText(path, Encoding.UTF8));
-                Dictionary<string, object> m = o as Dictionary<string, object>;
-                if (m == null) return;
-
-                if (Has(m, "port")) Port = Json.AsInt(Get(m, "port"));
-                if (Has(m, "llmApiUrl")) ApiBaseUrl = Json.AsString(Get(m, "llmApiUrl"));
-                if (Has(m, "llmApiKey")) SecretKey = Json.AsString(Get(m, "llmApiKey"));
-                if (Has(m, "model")) Model = Json.AsString(Get(m, "model"));
-                if (Has(m, "allowTools")) AllowTools = AsBool(Get(m, "allowTools"));
-                if (Has(m, "maxToolsPerTurn")) MaxToolsPerTurn = Json.AsInt(Get(m, "maxToolsPerTurn"));
-                if (Has(m, "toolTimeoutSec")) ToolTimeoutSec = Json.AsInt(Get(m, "toolTimeoutSec"));
-                if (Has(m, "contextWindow")) ContextWindow = Json.AsInt(Get(m, "contextWindow"));
-                if (Has(m, "reserveTokens")) ReserveTokens = Json.AsInt(Get(m, "reserveTokens"));
-                if (Has(m, "keepRecentTokens")) KeepRecentTokens = Json.AsInt(Get(m, "keepRecentTokens"));
-                if (Has(m, "preserveRecentTokens")) KeepRecentTokens = Json.AsInt(Get(m, "preserveRecentTokens"));
-                if (Has(m, "proxyUrl")) ProxyUrl = Json.AsString(Get(m, "proxyUrl"));
-                if (Has(m, "proxyUser")) ProxyUser = Json.AsString(Get(m, "proxyUser"));
-                if (Has(m, "proxyPass")) ProxyPass = Json.AsString(Get(m, "proxyPass"));
-                if (Has(m, "useSystemProxy")) UseSystemProxy = AsBool(Get(m, "useSystemProxy"));
-                if (Has(m, "systemPrompt")) SystemPrompt = Json.AsString(Get(m, "systemPrompt"));
-                if (Has(m, "bindPath")) BindPath = Json.AsString(Get(m, "bindPath"));
-                if (Has(m, "openBrowserOnStart")) OpenBrowserOnStart = AsBool(Get(m, "openBrowserOnStart"));
-                if (Has(m, "emitReasoning")) EmitReasoning = AsBool(Get(m, "emitReasoning"));
+                ApplyDict(o as Dictionary<string, object>);
             }
             catch { }
+        }
+
+        // 辞書(dict)から設定を適用する。設定ファイル読込と Web UI からの保存で共用。
+        public void ApplyDict(Dictionary<string, object> m)
+        {
+            if (m == null) return;
+
+            if (Has(m, "port")) Port = Json.AsInt(Get(m, "port"));
+            if (Has(m, "llmApiUrl")) ApiBaseUrl = Json.AsString(Get(m, "llmApiUrl"));
+            if (Has(m, "llmApiKey")) SecretKey = Json.AsString(Get(m, "llmApiKey"));
+            if (Has(m, "model")) Model = Json.AsString(Get(m, "model"));
+            if (Has(m, "allowTools")) AllowTools = AsBool(Get(m, "allowTools"));
+            if (Has(m, "maxToolsPerTurn")) MaxToolsPerTurn = Json.AsInt(Get(m, "maxToolsPerTurn"));
+            if (Has(m, "toolTimeoutSec")) ToolTimeoutSec = Json.AsInt(Get(m, "toolTimeoutSec"));
+            if (Has(m, "contextWindow")) ContextWindow = Json.AsInt(Get(m, "contextWindow"));
+            if (Has(m, "reserveTokens")) ReserveTokens = Json.AsInt(Get(m, "reserveTokens"));
+            if (Has(m, "keepRecentTokens")) KeepRecentTokens = Json.AsInt(Get(m, "keepRecentTokens"));
+            if (Has(m, "preserveRecentTokens")) KeepRecentTokens = Json.AsInt(Get(m, "preserveRecentTokens"));
+            if (Has(m, "proxyUrl")) ProxyUrl = Json.AsString(Get(m, "proxyUrl"));
+            if (Has(m, "proxyUser")) ProxyUser = Json.AsString(Get(m, "proxyUser"));
+            if (Has(m, "proxyPass")) ProxyPass = Json.AsString(Get(m, "proxyPass"));
+            if (Has(m, "useSystemProxy")) UseSystemProxy = AsBool(Get(m, "useSystemProxy"));
+            if (Has(m, "systemPrompt")) SystemPrompt = Json.AsString(Get(m, "systemPrompt"));
+            if (Has(m, "bindPath")) BindPath = Json.AsString(Get(m, "bindPath"));
+            if (Has(m, "openBrowserOnStart")) OpenBrowserOnStart = AsBool(Get(m, "openBrowserOnStart"));
+            if (Has(m, "emitReasoning")) EmitReasoning = AsBool(Get(m, "emitReasoning"));
+        }
+
+        // 現在の設定を JSON 用の辞書にする(Web UI / 設定ファイル保存で共用)
+        public Dictionary<string, object> ToJsonDict()
+        {
+            Dictionary<string, object> m = new Dictionary<string, object>();
+            m["port"] = Port;
+            m["llmApiUrl"] = ApiBaseUrl;
+            m["llmApiKey"] = SecretKey;
+            m["model"] = Model;
+            m["allowTools"] = AllowTools;
+            m["emitReasoning"] = EmitReasoning;
+            m["maxToolsPerTurn"] = MaxToolsPerTurn;
+            m["toolTimeoutSec"] = ToolTimeoutSec;
+            m["contextWindow"] = ContextWindow;
+            m["reserveTokens"] = ReserveTokens;
+            m["keepRecentTokens"] = KeepRecentTokens;
+            m["useSystemProxy"] = UseSystemProxy;
+            m["proxyUrl"] = ProxyUrl;
+            m["proxyUser"] = ProxyUser;
+            m["proxyPass"] = ProxyPass;
+            m["systemPrompt"] = SystemPrompt;
+            m["bindPath"] = BindPath;
+            m["openBrowserOnStart"] = OpenBrowserOnStart;
+            return m;
+        }
+
+        // 現在の設定を設定ファイルへ保存する(Web UI から呼ぶ)
+        public void Save()
+        {
+            string path = ConfigPath;
+            if (path == null || path.Trim().Length == 0) path = DefaultConfigPath();
+            ConfigPath = path;
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(path, Json.ToString(ToJsonDict()), new UTF8Encoding(false));
+        }
+
+        // 設定・セッションの保存先 (%APPDATA%\agentweb)
+        public static string AppDataDir()
+        {
+            string d = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (d == null || d.Length == 0) d = Path.GetTempPath();
+            return Path.Combine(d, "agentweb");
+        }
+
+        // 既定の設定ファイルパス (%APPDATA%\agentweb\agentweb.json)
+        public static string DefaultConfigPath()
+        {
+            return Path.Combine(AppDataDir(), "agentweb.json");
         }
 
         // 設定ファイルを再読み込みする(トレイメニューから呼ぶ)。
@@ -361,6 +430,10 @@ namespace AgentWeb
                 return RawResponse(204, new byte[0], "image/x-icon");
             if (req.Method == "GET" && path == "/api/health")
                 return HandleHealth();
+            if (req.Method == "GET" && path == "/api/config")
+                return HandleGetConfig();
+            if (req.Method == "POST" && path == "/api/config")
+                return HandleSetConfig(req);
             if (req.Method == "GET" && path == "/api/tools")
                 return HandleTools();
             if (req.Method == "GET" && path == "/api/diag/tools")
@@ -667,6 +740,50 @@ namespace AgentWeb
         }
 
         // ---------------- /api/health ----------------
+        // 設定を返す (Web UI の設定画面用)
+        HttpResponse HandleGetConfig()
+        {
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["ok"] = true;
+            d["config"] = config.ToJsonDict();
+            d["path"] = config.ConfigPath;
+            return JsonResponse(200, d);
+        }
+
+        // 設定を保存する (Web UI の設定画面用)。保存後は即時反映される。
+        HttpResponse HandleSetConfig(HttpRequest req)
+        {
+            if (req.Body != null && req.Body.Length > 0)
+            {
+                try
+                {
+                    object o = Json.Parse(Encoding.UTF8.GetString(req.Body));
+                    Dictionary<string, object> m = o as Dictionary<string, object>;
+                    if (m != null) config.ApplyDict(m);
+                }
+                catch (Exception ex)
+                {
+                    Dictionary<string, object> e = new Dictionary<string, object>();
+                    e["ok"] = false;
+                    e["message"] = "設定の解析に失敗しました: " + ex.Message;
+                    return JsonResponse(400, e);
+                }
+            }
+            try { config.Save(); }
+            catch (Exception ex)
+            {
+                Dictionary<string, object> e = new Dictionary<string, object>();
+                e["ok"] = false;
+                e["message"] = "設定の保存に失敗しました: " + ex.Message;
+                return JsonResponse(500, e);
+            }
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["ok"] = true;
+            d["config"] = config.ToJsonDict();
+            d["path"] = config.ConfigPath;
+            return JsonResponse(200, d);
+        }
+
         HttpResponse HandleHealth()
         {
             Dictionary<string, object> d = new Dictionary<string, object>();
@@ -722,6 +839,7 @@ namespace AgentWeb
                 catch { }
             }
             config.AllowTools = allow;
+            try { config.Save(); } catch { }   // 設定ファイルにも保存
             Dictionary<string, object> d = new Dictionary<string, object>();
             d["ok"] = true;
             d["allowTools"] = config.AllowTools;
@@ -1134,10 +1252,8 @@ namespace AgentWeb
 
         public SessionStore()
         {
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (appData == null || appData.Length == 0)
-                appData = Path.GetTempPath();
-            sessionsDir = Path.Combine(appData, "agentweb", "sessions");
+            // 設定ファイルと同じ場所 (%APPDATA%\agentweb) の sessions 配下に置く
+            sessionsDir = Path.Combine(Config.AppDataDir(), "sessions");
             Directory.CreateDirectory(sessionsDir);
         }
 
