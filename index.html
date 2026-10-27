@@ -694,6 +694,23 @@ function copyToClipboard(text, btn) {
   }
 }
 
+// ツール実行記録(配列) → HTML。live 表示とリロード後の復元で共用する
+function progressHtml(list) {
+  if (!list || !list.length) return "";
+  var html = "";
+  for (var i = 0; i < list.length; i++) {
+    var s = String(list[i]);
+    var m = s.match(/^ツール実行:\s+(.*?)\s{2,}([\s\S]*)$/);
+    if (m) {
+      html += '<div class="pstep">▶ ツール実行: ' + escapeHtml(m[1]) + '</div>' +
+              '<div class="pdetail">' + escapeHtml(m[2]) + '</div>';
+    } else {
+      html += '<div class="pstep">▶ ' + escapeHtml(s) + '</div>';
+    }
+  }
+  return html;
+}
+
 function bubble(role, text, ts, rawText) {
   var row = document.createElement("div");
   row.className = "msg " + role;
@@ -728,8 +745,16 @@ function userMsg(text, ts) {
   var el = bubble("user", escapeHtml(text), ts || fmtNow(), text);
   return el;
 }
-function assistantMsg(md, ts) {
+function assistantMsg(md, ts, steps) {
   var el = bubble("assistant", '<div class="md">' + renderMarkdown(md) + '</div>', ts || fmtNow(), md);
+  var html = progressHtml(steps);   // 保存されたツール実行記録(リロード後も表示)
+  if (html) {
+    var mdEl = el.querySelector(".md");
+    var pb = document.createElement("div");
+    pb.className = "progress";
+    pb.innerHTML = html;
+    el.insertBefore(pb, mdEl);
+  }
   return el;
 }
 function addTyping() {
@@ -875,7 +900,7 @@ function loadSession(messages) {
   emptyState(false); hasMessages = true;
   messages.forEach(function(m){
     if (m.role === "user") userMsg(m.content, m.ts);
-    else if (m.role === "assistant") assistantMsg(m.content, m.ts);
+    else if (m.role === "assistant") assistantMsg(m.content, m.ts, m.steps);
   });
   if (serverBusy) ensureTyping();
   scrollBottom();
@@ -1093,18 +1118,8 @@ function send() {
   // 取りこぼしがあっても必ず表示されるようにする(サーバ状態が唯一の真実)。
   var progTimer = null;
   function renderProgressList(list) {
-    if (!list || !list.length) return;
-    var html = "";
-    for (var i = 0; i < list.length; i++) {
-      var s = String(list[i]);
-      var m = s.match(/^ツール実行:\s+(.*?)\s{2,}([\s\S]*)$/);
-      if (m) {
-        html += '<div class="pstep">▶ ツール実行: ' + escapeHtml(m[1]) + '</div>' +
-                '<div class="pdetail">' + escapeHtml(m[2]) + '</div>';
-      } else {
-        html += '<div class="pstep">▶ ' + escapeHtml(s) + '</div>';
-      }
-    }
+    var html = progressHtml(list);
+    if (!html) return;
     prog.innerHTML = html;
     prog.style.display = "block";
     scrollBottom();

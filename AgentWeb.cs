@@ -790,6 +790,7 @@ namespace AgentWeb
                     mv["role"] = role;
                     mv["content"] = content;
                     mv["ts"] = (m.ContainsKey("ts")) ? Json.AsString(m["ts"]) : "";
+                    if (m.ContainsKey("steps")) mv["steps"] = m["steps"];   // ツール実行の記録
                     view.Add(mv);
                 }
             }
@@ -1345,6 +1346,7 @@ namespace AgentWeb
             ctx.Messages.Add(Msg("user", userMessage));
             AgentProgress.Clear();
             AgentControl.Reset();
+            List<object> turnSteps = new List<object>();   // このターンのツール実行記録
 
             // トークン超過時は古い文脈を要約して置換(コンパクション)
             MaybeCompact(cfg, ctx);
@@ -1354,7 +1356,7 @@ namespace AgentWeb
             {
                 for (int turn = 0; turn < MAX_TURNS; turn++)
                 {
-                    if (AgentControl.CancelRequested) return CancelReply(ctx);
+                    if (AgentControl.CancelRequested) return CancelReply(ctx, turnSteps);
 
                     List<object> eff = BuildEffectiveMessages(cfg, ctx);
                     LlmResp resp;
@@ -1364,7 +1366,7 @@ namespace AgentWeb
                     }
                     catch (AgentCancelledException)
                     {
-                        return CancelReply(ctx);
+                        return CancelReply(ctx, turnSteps);
                     }
                     if (resp.TotalTokens > 0) ctx.LastTotalTokens = resp.TotalTokens;
 
@@ -1376,7 +1378,7 @@ namespace AgentWeb
                         int n = Math.Min(resp.ToolCalls.Count, cfg.MaxToolsPerTurn);
                         for (int k = 0; k < n; k++)
                         {
-                            if (AgentControl.CancelRequested) return CancelReply(ctx);
+                            if (AgentControl.CancelRequested) return CancelReply(ctx, turnSteps);
 
                             Dictionary<string, object> call = resp.ToolCalls[k] as Dictionary<string, object>;
                             if (call == null) { continue; }
@@ -1410,7 +1412,7 @@ namespace AgentWeb
                             if (fn != null && name != null && name.Trim().Length > 0) fn["name"] = name;
 
                             string ndetail = ToolDetail(name, argsJson);
-                            AgentProgress.Add("ツール実行: " + (name.Length > 0 ? name : "?") + (ndetail.Length > 0 ? ("  " + ndetail) : ""));
+                            AddStep(turnSteps, "ツール実行: " + (name.Length > 0 ? name : "?") + (ndetail.Length > 0 ? ("  " + ndetail) : ""));
                             Console.WriteLine("[agent] tool_call[" + k + "] id=" + id + " name=" + name);
                             Console.WriteLine("[agent]   args=" + (argsJson.Length > 400 ? argsJson.Substring(0, 400) : argsJson));
 
@@ -1432,7 +1434,7 @@ namespace AgentWeb
 
                     // 最終回答
                     string final = resp.Content;
-                    ctx.Messages.Add(Msg("assistant", final));
+                    ctx.Messages.Add(Msg("assistant", final, turnSteps));
                     return final;
                 }
                 throw new Exception("LLM が最終回答を出せませんでした(ツール反復が多すぎます)");
@@ -1443,10 +1445,10 @@ namespace AgentWeb
             }
         }
 
-        static string CancelReply(SessionCtx ctx)
+        static string CancelReply(SessionCtx ctx, List<object> steps)
         {
             string msg = "⚠ 処理を中断しました。";
-            ctx.Messages.Add(Msg("assistant", msg));
+            ctx.Messages.Add(Msg("assistant", msg, steps));
             return msg;
         }
 
@@ -1638,6 +1640,21 @@ namespace AgentWeb
             return m;
         }
 
+        // ツール実行の記録を添えたメッセージ(UI でリロード後も表示できるよう保存する)
+        static Dictionary<string, object> Msg(string role, string content, List<object> steps)
+        {
+            Dictionary<string, object> m = Msg(role, content);
+            if (steps != null && steps.Count > 0) m["steps"] = steps;
+            return m;
+        }
+
+        // ツール実行の記録を、進捗ログとターン記録の両方へ追加する
+        static void AddStep(List<object> steps, string s)
+        {
+            if (steps != null) steps.Add(s);
+            AgentProgress.Add(s);
+        }
+
         // 単発のテキスト生成(セッション名の自動生成など)を外部から呼ぶための公開ラッパ
         public static string CompleteText(Config cfg, string systemPrompt, string userText)
         {
@@ -1763,7 +1780,7 @@ namespace AgentWeb
                 if (m == null) { apiMessages.Add(o); continue; }
                 Dictionary<string, object> c = new Dictionary<string, object>();
                 foreach (KeyValuePair<string, object> kv in m)
-                    if (kv.Key != "ts") c[kv.Key] = kv.Value;
+                    if (kv.Key != "ts" && kv.Key != "steps") c[kv.Key] = kv.Value;   // 保存用メタデータは送らない
                 apiMessages.Add(c);
             }
             body["messages"] = apiMessages;
@@ -1886,7 +1903,7 @@ namespace AgentWeb
                 if (m == null) { apiMessages.Add(o); continue; }
                 Dictionary<string, object> c = new Dictionary<string, object>();
                 foreach (KeyValuePair<string, object> kv in m)
-                    if (kv.Key != "ts") c[kv.Key] = kv.Value;
+                    if (kv.Key != "ts" && kv.Key != "steps") c[kv.Key] = kv.Value;   // 保存用メタデータは送らない
                 apiMessages.Add(c);
             }
             body["messages"] = apiMessages;
@@ -2164,6 +2181,7 @@ namespace AgentWeb
             ctx.Messages.Add(Msg("user", userMessage));
             AgentProgress.Clear();
             AgentControl.Reset();
+            List<object> turnSteps = new List<object>();   // このターンのツール実行記録
             MaybeCompact(cfg, ctx);
             if (save != null) save(ctx);
 
@@ -2173,7 +2191,7 @@ namespace AgentWeb
                 {
                     if (AgentControl.CancelRequested)
                     {
-                        ctx.Messages.Add(Msg("assistant", "⚠ 処理を中断しました。"));
+                        ctx.Messages.Add(Msg("assistant", "⚠ 処理を中断しました。", turnSteps));
                         if (emit != null) emit("done", "{\"stopped\":true}");
                         return;
                     }
@@ -2222,7 +2240,7 @@ namespace AgentWeb
                             Console.WriteLine("[agent] stream tool_call[" + k + "] name=" + name
                                 + " args=" + (argsJson.Length > 300 ? argsJson.Substring(0, 300) : argsJson));
                             string tdetail = ToolDetail(name, argsJson);
-                            AgentProgress.Add("ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
+                            AddStep(turnSteps, "ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
                             if (emit != null) emit("tool", "{ \"name\" : \"" + JsonEscape(name) + "\", \"detail\" : \"" + JsonEscape(tdetail) + "\" }");
                             string result;
                             try { result = ToolExecutor.Execute(name, argsJson, cfg); }
@@ -2235,7 +2253,7 @@ namespace AgentWeb
                     }
 
                     string final = resp.Content;
-                    ctx.Messages.Add(Msg("assistant", final));
+                    ctx.Messages.Add(Msg("assistant", final, turnSteps));
                     if (emit != null) emit("done", "{ \"session\" : \"" + Escape(ctx.Id) + "\" }");
                     return;
                 }
