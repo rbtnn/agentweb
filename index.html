@@ -297,6 +297,8 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .typing span:nth-child(2) { animation-delay: .2s; }
   .typing span:nth-child(3) { animation-delay: .4s; }
   .progress { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
+  .waiting { margin: 0 0 2px; }
+  .waiting .typing { padding: 2px 0; }
   .pstep { font-size: 11px; color: var(--accent); word-break: break-all; }
   .pdetail {
     font-size: 11px; color: var(--muted);
@@ -1029,6 +1031,16 @@ function send() {
   prog.style.display = "none";
   bubbleEl.appendChild(prog);
 
+  // 待機中アニメーション(3点ドット)。thinking が無いモデルでも「動いている」ことが分かるように
+  var waitEl = document.createElement("div");
+  waitEl.className = "waiting";
+  waitEl.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  bubbleEl.insertBefore(waitEl, mdEl);
+  function hideWait() {
+    if (waitEl && waitEl.parentNode) waitEl.parentNode.removeChild(waitEl);
+    waitEl = null;
+  }
+
   // 思考(thinking)ブロック: reasoning トークンが来たら生成
   var thinkEl = null, thinkBody = null, thinkText = "";
   function ensureThink() {
@@ -1068,12 +1080,20 @@ function send() {
 
     function handle(ev, dat) {
       var d = null; try { d = JSON.parse(dat); } catch(e){}
-      if (ev === "content" && d) { fullText += (d.t || ""); paint(false); }
+      if (ev === "content" && d) {
+        fullText += (d.t || "");
+        if (fullText.length > 0) hideWait();   // 最初の本文が来たら待機アニメを消す
+        paint(false);
+      }
       else if (ev === "reasoning" && d) {
-        ensureThink();
-        thinkText += (d.t || "");
-        thinkBody.textContent = thinkText;
-        scrollBottom();
+        var rt = (d.t || "");
+        if (rt.length > 0) {
+          hideWait();
+          ensureThink();
+          thinkText += rt;
+          thinkBody.textContent = thinkText;
+          scrollBottom();
+        }
       }
       else if (ev === "tool" && d) {
         prog.style.display = "block";
@@ -1084,9 +1104,11 @@ function send() {
         scrollBottom();
       }
       else if (ev === "error" && d) {
+        hideWait();
         bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ ' + escapeHtml(String(d.message||"エラー")) + '</div></div>';
       }
       else if (ev === "done" && d) {
+        hideWait();
         if (thinkEl) thinkEl.open = false;   // 完了時に思考を折りたたむ
         if (d.session) { sessionId = d.session; localStorage.setItem("aiagent.session", sessionId); }
         refreshSessions();
