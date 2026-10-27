@@ -296,7 +296,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   }
   .typing span:nth-child(2) { animation-delay: .2s; }
   .typing span:nth-child(3) { animation-delay: .4s; }
-  .progress { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
+  .progress { margin: 0 0 6px; display: flex; flex-direction: column; gap: 3px; }
   .waiting { margin: 0 0 2px; }
   .waiting .typing { padding: 2px 0; }
   .pstep { font-size: 11px; color: var(--accent); word-break: break-all; }
@@ -1043,10 +1043,10 @@ function send() {
 
   var bubbleEl = assistantMsg("");                // 空の assistant 吹き出し
   var mdEl = bubbleEl.querySelector(".md");
-  var prog = document.createElement("div");       // ツール進捗
+  var prog = document.createElement("div");       // ツール実行の表示(思考ブロックの外・吹き出し上部)
   prog.className = "progress";
   prog.style.display = "none";
-  bubbleEl.appendChild(prog);
+  bubbleEl.insertBefore(prog, mdEl);
 
   // 待機中アニメーション(3点ドット)。thinking が無いモデルでも「動いている」ことが分かるように
   var waitEl = document.createElement("div");
@@ -1164,7 +1164,7 @@ function send() {
         hideWait();
         pollProgress();          // 最後の進捗を反映
         stopProgressPoll();
-        if (thinkEl) thinkEl.open = false;   // 完了時に思考を折りたたむ
+        // 思考は自動で折りたたまない(必要なとき手動で閉じる)
         if (d.session) { sessionId = d.session; localStorage.setItem("aiagent.session", sessionId); }
         refreshSessionList();   // 会話は再描画しない(ツール実行の表示を残す)
       }
