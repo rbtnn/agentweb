@@ -248,11 +248,29 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     flex-wrap: wrap;
   }
   .composer .side { display: flex; flex-direction: column; align-items: stretch; gap: 8px; flex: 1; min-width: 0; }
+  /* 右側の列: 送信ボタンと、その真下に settings ボタン */
+  .composer-right {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .settings-btn {
+    width: 100%;
+    height: 26px;
+    padding: 0 9px;
+    font-size: 11px;
+    white-space: nowrap;
+    text-align: center;
+  }
+  /* セッション欄は左寄せ(テキストエリアの左端に揃える) */
   .composer-bar {
     max-width: 860px;
     margin: 8px auto 0;
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 8px;
     flex-wrap: wrap;
     font-size: 11px;
@@ -269,12 +287,12 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   }
   .theme-link:hover { background: var(--panel-2); color: var(--text); }
 
-  /* ---------- セッション欄（settings ボタンの右側） ---------- */
+  /* ---------- セッション欄（左寄せ） ---------- */
   .sess-panel {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex: 1 1 200px;
+    flex: 0 1 auto;
     min-width: 0;
     max-width: 420px;
   }
@@ -501,7 +519,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
 
   @media (max-width: 980px) {
-    .sess-panel { max-width: none; flex-basis: 100%; }
+    .sess-panel { max-width: none; flex: 1 1 auto; }
   }
   @media (max-width: 700px) {
     .modal-body { grid-template-columns: 1fr; }
@@ -524,15 +542,16 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
       <div class="side">
         <textarea id="input" rows="1" placeholder="AI エージェントに質問する…  (Enter で送信 / Shift+Enter で改行)"></textarea>
       </div>
-      <button type="button" class="send" id="sendBtn" disabled title="送信">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M3.4 20.4 22 12 3.4 3.6 3.4 10 15 12 3.4 14Z"/>
-        </svg>
-      </button>
+      <div class="composer-right">
+        <button type="button" class="send" id="sendBtn" disabled title="送信">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M3.4 20.4 22 12 3.4 3.6 3.4 10 15 12 3.4 14Z"/>
+          </svg>
+        </button>
+        <button type="button" class="theme-link settings-btn" id="settingsBtn" title="設定">⚙ settings</button>
+      </div>
     </div>
     <div class="composer-bar">
-      <span class="status" id="conn">connecting…</span>
-      <button type="button" class="theme-link" id="settingsBtn" title="設定">⚙ settings</button>
       <div class="sess-panel">
         <select class="sess-select" id="settingsSessionList" title="セッションを選択" aria-label="セッション一覧"></select>
         <div class="sess-actions">
@@ -695,7 +714,6 @@ var sessNewBtn    = document.getElementById("settingsNew");
 var sessItems = [];      // 表示中のセッション [{id,title,count}]
 var sessSelId = "";      // ドロップダウンで選択中の ID
 var allowTools = true;   // 設定モーダルでのみ変更する
-var connEl = document.getElementById("conn");
 var thinkBodyRef = null;   // 生成中の思考本文 (.think-body)。内部スクロールを追従させるため参照を保持
 
 function emptyState(show) {
@@ -1076,15 +1094,11 @@ function pollServerBusy() {
         ensureTyping();
         renderProgress(d && d.progress);
         startBusyPoll();
-        connEl.textContent = "応答中…";
-        connEl.style.color = "#fbbf24";
       } else {
         stopBusyPoll();
         if (was) {
           setBusy(false);
           hideTyping();
-          connEl.textContent = "connected";
-          connEl.style.color = "#4ade80";
           refreshSessionList(); // 一覧のみ更新(会話の再描画はしない)
         }
       }
@@ -1104,22 +1118,11 @@ function initServerState() {
           if (!document.getElementById("typing")) addTyping();
           renderProgress(d && d.progress);
           startBusyPoll();
-          connEl.textContent = "応答中…";
-          connEl.style.color = "#fbbf24";
-        } else if (d.apiKey === "not-set") {
-          connEl.textContent = "LLM_API_KEY 未設定";
-          connEl.style.color = "#fbbf24";
-        } else {
-          connEl.textContent = "connected";
-          connEl.style.color = "#4ade80";
         }
-      } else {
-        connEl.textContent = "connected";
-        connEl.style.color = "#4ade80";
       }
       refreshSessions(); // サーバ状態確定後にセッションを読み込み
     })
-    .catch(function(){ connEl.textContent = "connected"; connEl.style.color = "#4ade80"; refreshSessions(); });
+    .catch(function(){ refreshSessions(); });
 }
 
 function send() {
@@ -1130,7 +1133,6 @@ function send() {
   inputEl.value = ""; resizeInput();
   scrollBottom();
   setBusy(true);
-  connEl.textContent = "応答中…"; connEl.style.color = "#fbbf24";
 
   thinkBodyRef = null;                            // 前のターンの思考本文への参照を解除
   var bubbleEl = assistantMsg("");                // 空の assistant 吹き出し
@@ -1307,9 +1309,8 @@ function send() {
       stopProgressPoll();
       bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ 通信エラー: ' + escapeHtml(String(err)) + '</div></div>';
       refreshSessionList();
-      connEl.textContent = "disconnected"; connEl.style.color = "#f87171";
     })
-    .then(function(){ stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessionList(); connEl.textContent="connected"; connEl.style.color="#4ade80"; });
+    .then(function(){ stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessionList(); });
 }
 
 /* ---------- events ---------- */
@@ -1321,7 +1322,6 @@ inputEl.addEventListener("keydown", function(e){
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
 inputEl.addEventListener("input", resizeInput);
-inputEl.addEventListener("focus", function(){ if (!hasMessages) connEl.textContent = "connected"; });
 
 /* ---------- テーマ切替 (設定モーダルの Colorscheme で変更) ---------- */
 function currentTheme(){
