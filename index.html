@@ -703,7 +703,7 @@ function renderSessionList(sessions, selected) {
     del.textContent = "×";
     del.addEventListener("click", function(ev){
       ev.stopPropagation();
-      deleteSession(s.id);
+      deleteSession(s.id, s.title);
     });
 
     item.appendChild(txt);
@@ -738,7 +738,15 @@ function startRename(id, currentTitle, item, txt) {
   input.addEventListener("blur", commit);
 }
 
-function deleteSession(id) {
+function deleteSession(id, title) {
+  var name = (title && String(title).trim().length > 0) ? String(title).trim() : "（無題）";
+  var ok = false;
+  try {
+    ok = confirm("このセッションを削除しますか？\n\n" + name + "\n\n削除した会話履歴は元に戻せません。");
+  } catch (e) {
+    ok = true;   // confirm が使えない環境ではそのまま削除
+  }
+  if (!ok) return;
   fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" })
     .catch(function(){})
     .then(function(){ refreshSessions(); });
