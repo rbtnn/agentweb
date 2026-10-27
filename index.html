@@ -77,120 +77,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ---------- top bar ---------- */
-  header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 18px;
-    border-bottom: 1px solid var(--border);
-    background: var(--panel);
-  }
-  .logo {
-    width: 32px; height: 32px;
-    border-radius: 8px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    display: grid; place-items: center;
-    flex: none;
-  }
-  .logo svg { width: 20px; height: 20px; fill: var(--accent); }
-  .head-title { display: flex; flex-direction: column; line-height: 1.25; }
-  .head-title .t { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-  .head-title .s { font-size: 12px; color: var(--muted); }
-  .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-  .badge {
-    font-size: 12px; color: var(--muted);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 9px;
-  }
-  .badge b { color: var(--text); font-weight: 600; }
-
   .layout { display: flex; flex: 1; min-height: 0; }
-
-  /* ---------- sidebar ---------- */
-  .sidebar {
-    width: 258px;
-    flex: none;
-    border-right: 1px solid var(--border);
-    background: var(--panel);
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .sidebar-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 14px 12px 54px;   /* 左はフローティング × の分を空ける */
-    border-bottom: 1px solid var(--border);
-  }
-  .sidebar-title { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
-  .new-btn {
-    width: 28px; height: 28px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
-    font: inherit; font-size: 16px; line-height: 1;
-    cursor: pointer;
-    display: grid; place-items: center;
-  }
-  .new-btn:hover { background: var(--panel-3); }
-  .session-list { flex: 1; overflow-y: auto; padding: 6px; min-height: 0; }
-  .session-list::-webkit-scrollbar { width: 10px; }
-  .session-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
-  .session-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    color: var(--muted);
-    margin-bottom: 2px;
-    transition: background .12s ease, color .12s ease;
-  }
-  .session-item:hover { background: var(--panel-2); color: var(--text); }
-  .session-item.active { background: var(--panel-3); color: var(--accent); }
-  .session-item .s-txt {
-    flex: 1; min-width: 0;
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .session-item .s-del, .session-item .s-ren, .session-item .s-auto, .session-item .s-new {
-    flex: none;
-    width: 20px; height: 20px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--muted);
-    font: inherit; font-size: 14px; line-height: 1;
-    cursor: pointer;
-    display: grid; place-items: center;
-    opacity: 0;
-  }
-  .session-item:hover .s-del, .session-item:hover .s-ren, .session-item:hover .s-auto, .session-item:hover .s-new { opacity: 1; }
-  .session-item .s-del:hover { background: var(--panel-2); color: var(--danger); }
-  .session-item .s-ren:hover { background: var(--panel-2); color: var(--accent); }
-  .session-item .s-auto:hover { background: var(--panel-2); color: var(--accent); }
-  .session-item .s-new:hover { background: var(--panel-2); color: var(--accent); }
-  .session-item .s-auto:disabled { opacity: 1; cursor: progress; }
-  .session-item .s-edit {
-    flex: 1; min-width: 0;
-    width: 100%;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    font: inherit; font-size: 13px;
-    padding: 2px 6px;
-    outline: none;
-  }
 
   /* ---------- chat ---------- */
   main { flex: 1; overflow-y: auto; }
@@ -371,8 +258,6 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     font-size: 11px;
     color: var(--muted);
   }
-  .composer-bar .badge { font-size: 10px; padding: 2px 7px; }
-  .tools-toggle { cursor: pointer; font: inherit; }
   .theme-link {
     cursor: pointer;
     font: inherit;
@@ -414,6 +299,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   /* ボタンはサイドバーと同じアイコンボタン（常時表示） */
   .sess-actions { display: flex; align-items: center; gap: 2px; flex: none; }
   .sess-actions .s-auto,
+  .sess-actions .s-ren,
   .sess-actions .s-del,
   .sess-actions .s-new {
     flex: none;
@@ -425,18 +311,33 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     font: inherit; font-size: 14px; line-height: 1;
     cursor: pointer;
     display: grid; place-items: center;
-    opacity: 1;            /* サイドバーは hover で出すが、ここは常時表示 */
+    opacity: 1;
   }
   .sess-actions .s-auto:hover { background: var(--panel-2); color: var(--accent); }
+  .sess-actions .s-ren:hover { background: var(--panel-2); color: var(--accent); }
   .sess-actions .s-del:hover { background: var(--panel-2); color: var(--danger); }
   .sess-actions .s-new:hover { background: var(--panel-2); color: var(--accent); }
   .sess-actions .s-auto:disabled,
+  .sess-actions .s-ren:disabled,
   .sess-actions .s-del:disabled { opacity: .4; cursor: default; background: transparent; color: var(--muted); }
   .sess-actions .s-auto:disabled:hover,
+  .sess-actions .s-ren:disabled:hover,
   .sess-actions .s-del:disabled:hover { background: transparent; color: var(--muted); }
-  .sidebar.hidden { display: none; }
-  .side-actions { display: flex; gap: 4px; align-items: center; }
-  .composer-left { display: flex; flex-direction: column; gap: 4px; flex: none; padding-bottom: 4px; }
+  /* 名前変更はドロップダウンを入力欄に差し替えてインライン編集する */
+  .sess-select.editing { display: none; }
+  .sess-edit {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 26px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    padding: 0 6px;
+    outline: none;
+  }
   textarea {
     width: 100%;
     resize: none;
@@ -488,26 +389,6 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     cursor: pointer;
   }
   button.ghost:hover { background: var(--panel-2); color: var(--text); }
-
-  /* モバイル用のサイドバー表示ボタン */
-  .fab {
-    position: fixed;
-    top: 10px; left: 10px;
-    z-index: 50;
-    width: 34px; height: 34px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--panel) 82%, transparent);
-    color: var(--text);
-    font-size: 16px; line-height: 1;
-    cursor: pointer;
-    display: none;
-    place-items: center;
-    opacity: .7;
-    backdrop-filter: blur(3px);
-  }
-  .fab:hover { opacity: 1; }
-  .fab.on { display: grid; }   /* 表示中(ハンバーガー/×で排他) */
 
   /* ---------- 設定モーダル (Pi Web のモーダルに合わせた見た目) ---------- */
   .modal-overlay {
@@ -624,10 +505,6 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   }
   @media (max-width: 700px) {
     .modal-body { grid-template-columns: 1fr; }
-    .layout { flex-direction: column; }
-    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
-    .session-list { display: flex; flex-wrap: nowrap; overflow-x: auto; padding: 6px; }
-    .session-item { flex: none; min-width: 130px; }
   }
   @media (max-width: 560px) {
     .bubble { max-width: 92%; }
@@ -636,19 +513,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
 </style>
 </head>
 <body>
-  <!-- ハンバーガーと × は同じ位置(左上)に固定し、表示だけ切り替える -->
-  <button type="button" id="sideToggle" class="fab" title="サイドバーを表示">☰</button>
-  <button type="button" id="sideClose" class="fab" title="サイドバーを閉じる">×</button>
   <div class="layout">
-    <aside id="sidebar" class="sidebar">
-      <div class="sidebar-head">
-        <span class="sidebar-title">Sessions</span>
-        <div class="side-actions">
-          <button type="button" id="newBtn" class="new-btn" title="新規セッション">＋</button>
-        </div>
-      </div>
-      <div id="sessionList" class="session-list"></div>
-    </aside>
     <main id="main">
       <div class="chat" id="chat"></div>
     </main>
@@ -667,14 +532,12 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     </div>
     <div class="composer-bar">
       <span class="status" id="conn">connecting…</span>
-      <span class="badge">model <b id="modelLabel">—</b></span>
-      <button type="button" class="badge tools-toggle" id="toolsBadge" title="ツール実行を切り替え">tools —</button>
-      <button type="button" class="theme-link" id="themeBtn" title="テーマ切替">colorscheme dark</button>
       <button type="button" class="theme-link" id="settingsBtn" title="設定">⚙ settings</button>
       <div class="sess-panel">
         <select class="sess-select" id="settingsSessionList" title="セッションを選択" aria-label="セッション一覧"></select>
         <div class="sess-actions">
           <button type="button" class="s-auto" id="settingsAutotitle" title="会話内容から名前を自動設定">⟳</button>
+          <button type="button" class="s-ren" id="settingsRename" title="名前を変更">✎</button>
           <button type="button" class="s-del" id="settingsDelete" title="このセッションを削除">×</button>
           <button type="button" class="s-new" id="settingsNew" title="新しいセッションを作成">＋</button>
         </div>
@@ -823,24 +686,16 @@ function runMermaid(){
 var chatEl = document.getElementById("chat");
 var inputEl = document.getElementById("input");
 var sendBtn = document.getElementById("sendBtn");
-var sideToggle = document.getElementById("sideToggle");
-var toolsBadge = document.getElementById("toolsBadge");
 // 画面下部のセッション欄 (settings ボタンの右側)
 var sessListBox   = document.getElementById("settingsSessionList");
 var sessAutotitle = document.getElementById("settingsAutotitle");
+var sessRenameBtn = document.getElementById("settingsRename");
 var sessDeleteBtn = document.getElementById("settingsDelete");
 var sessNewBtn    = document.getElementById("settingsNew");
 var sessItems = [];      // 表示中のセッション [{id,title,count}]
-var sessSelId = "";      // リストボックスで選択中の ID
-var allowTools = true;
-function updateToolsBadge() {
-  if (!toolsBadge) return;
-  toolsBadge.innerHTML = "tools <b>" + (allowTools ? "on" : "off") + "</b>";
-  toolsBadge.style.color = allowTools ? "" : "#f87171";
-  toolsBadge.title = "ツール実行を" + (allowTools ? "無効化" : "有効化");
-}
+var sessSelId = "";      // ドロップダウンで選択中の ID
+var allowTools = true;   // 設定モーダルでのみ変更する
 var connEl = document.getElementById("conn");
-var modelEl = document.getElementById("modelLabel");
 var thinkBodyRef = null;   // 生成中の思考本文 (.think-body)。内部スクロールを追従させるため参照を保持
 
 function emptyState(show) {
@@ -997,84 +852,48 @@ var busy = false;
 var hasMessages = false;
 var serverBusy = false;   // サーバ側の処理中フラグ (/api/health の busy)
 var busyTimer = null;     // 処理中ステータスのポーリングタイマー
-var sessionListEl = document.getElementById("sessionList");
-var newBtn = document.getElementById("newBtn");
 
 // 現在のセッションID (ローカルに保持、サーバ管理のセッションと紐付け)
 var sessionId = localStorage.getItem("aiagent.session") || "";
 
 function emptyChat() { chatEl.innerHTML = ""; hasMessages = false; emptyState(true); }
 
-function renderSessionList(sessions, selected) {
-  sessionListEl.innerHTML = "";
-  sessions.forEach(function(s){
-    var cnt = (s.count || 0);
-    var item = document.createElement("div");
-    item.className = "session-item" + (s.id === selected ? " active" : "");
-    item.setAttribute("data-id", s.id);
-    item.title = s.title || "会話";
-    item.addEventListener("click", function(){ selectSession(s.id); });
-
-    var txt = document.createElement("div");
-    txt.className = "s-txt";
-    txt.textContent = (s.title || "会話") + (cnt > 0 ? " · " + cnt : "");
-
-    var ren = document.createElement("button");
-    ren.className = "s-ren";
-    ren.title = "名前を変更";
-    ren.textContent = "✎";
-    ren.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      startRename(s.id, s.title || "", item, txt);
-    });
-
-    var auto = document.createElement("button");
-    auto.className = "s-auto";
-    auto.title = "会話内容から名前を自動設定";
-    auto.textContent = "⟳";
-    auto.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      autoTitle(s.id, auto);
-    });
-
-    var del = document.createElement("button");
-    del.className = "s-del";
-    del.title = "このセッションを削除";
-    del.textContent = "×";
-    del.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      deleteSession(s.id, s.title);
-    });
-
-    item.appendChild(txt);
-    item.appendChild(auto);
-    item.appendChild(ren);
-    item.appendChild(del);
-    sessionListEl.appendChild(item);
-  });
-}
-
-// サイドバー内でタイトルをインライン編集する
-function startRename(id, currentTitle, item, txt) {
+// ドロップダウンを入力欄に差し替えてタイトルをインライン編集する
+function startRename(id, currentTitle) {
+  if (!id || !sessListBox) return;
   var input = document.createElement("input");
-  input.className = "s-edit";
-  input.value = currentTitle;
-  txt.replaceWith(input);
+  input.className = "sess-edit";
+  input.value = currentTitle || "";
+  input.maxLength = 200;
+  sessListBox.classList.add("editing");   // 編集中はドロップダウンを隠す
+  sessListBox.parentNode.insertBefore(input, sessListBox);
   input.focus();
   input.select();
 
+  var finished = false;
+  var finish = function(){
+    if (finished) return;
+    finished = true;
+    sessListBox.classList.remove("editing");
+    if (input.parentNode) input.parentNode.removeChild(input);
+    refreshSettingsSessions(id);
+  };
   var commit = function(){
+    if (finished) return;
     var v = input.value.trim();
-    if (v.length === 0) v = "新規会話";
+    if (v.length === 0) { finish(); return; }
     fetch("/api/sessions/" + encodeURIComponent(id) + "/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: v })
-    }).catch(function(){}).then(function(){ refreshSessionList(); });
+    }).catch(function(){}).then(function(){ finish(); });
   };
   input.addEventListener("keydown", function(e){
     if (e.key === "Enter") { e.preventDefault(); commit(); }
-    else if (e.key === "Escape") { refreshSessionList(); }
+    else if (e.key === "Escape") { e.preventDefault(); finished = true;
+      sessListBox.classList.remove("editing");
+      if (input.parentNode) input.parentNode.removeChild(input);
+      refreshSettingsSessions(id); }
   });
   input.addEventListener("blur", commit);
 }
@@ -1088,8 +907,7 @@ function autoTitle(id, btn) {
     .then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
       if (d && d.ok) {
-        refreshSessionList();
-        refreshSettingsSessions();   // 画面下部のセッション欄も更新
+        refreshSettingsSessions(id);   // セッション欄を更新
       }
       else { alert("名前の自動設定に失敗しました: " + ((d && (d.message || d.error)) || "不明なエラー")); }
     })
@@ -1111,8 +929,7 @@ function deleteSession(id, title) {
     .then(function(){
       // 表示中のセッションを消した時だけ会話も作り直す(それ以外は一覧だけ更新)
       if (id === sessionId) refreshSessions();
-      else refreshSessionList();
-      refreshSettingsSessions();   // 画面下部のセッション欄も更新
+      else refreshSettingsSessions();
       return true;
     });
 }
@@ -1153,16 +970,16 @@ function selectSession(id) {
   fetchSession(id);
 }
 
-// 現在の sessionId に合わせて一覧の active クラスを付け替える
+// 現在の sessionId に合わせてドロップダウンの選択を付け替える
 function updateActiveItem() {
-  if (!sessionListEl) return;
-  var items = sessionListEl.querySelectorAll(".session-item");
-  for (var i = 0; i < items.length; i++) {
-    var it = items[i];
-    var id = it.getAttribute("data-id") || "";
-    if (id === sessionId) it.classList.add("active");
-    else it.classList.remove("active");
+  if (!sessListBox) return;
+  var found = false;
+  for (var i = 0; i < sessListBox.options.length; i++) {
+    if (sessListBox.options[i].value === sessionId) { found = true; break; }
   }
+  if (found) sessListBox.value = sessionId;
+  sessSelId = sessionId;
+  updateSessButtons();
 }
 
 function refreshSessions() {
@@ -1177,31 +994,17 @@ function refreshSessions() {
         if (sessions.length > 0) target = sessions[0].id; // 最近のセッションへ
         else { createSession(true); return; }              // 1つも無ければ作成
       }
-      renderSessionList(sessions, target);
       sessionId = target;
       localStorage.setItem("aiagent.session", target);
-      refreshSettingsSessions(target);   // 画面下部のセッション欄も合わせる
+      refreshSettingsSessions(target);   // セッション欄の選択も合わせる
       fetchSession(target);
     })
     .catch(function(){ emptyChat(); });
 }
 
-// サイドバーの一覧だけを更新する（会話の再描画はしない＝ツール実行の表示を消さない）
+// セッション欄だけを更新する（会話の再描画はしない＝ツール実行の表示を消さない）
 function refreshSessionList() {
-  fetch("/api/sessions")
-    .then(function(r){ return r.json().catch(function(){ return null; }); })
-    .then(function(d){
-      if (!d || !d.ok) return;
-      var sessions = d.sessions || [];
-      var exists = sessions.some(function(s){ return s.id === sessionId; });
-      if (!exists && sessions.length > 0) {
-        sessionId = sessions[0].id;
-        localStorage.setItem("aiagent.session", sessionId);
-      }
-      renderSessionList(sessions, sessionId);
-      refreshSettingsSessions(sessionId);
-    })
-    .catch(function(){});
+  refreshSettingsSessions(sessionId);
 }
 
 function createSession(silent) {
@@ -1294,9 +1097,7 @@ function initServerState() {
   fetch("/api/health").then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
       if (d && d.ok) {
-        modelEl.textContent = d.model || "—";
         allowTools = !(d.allowTools === false);
-        updateToolsBadge();
         serverBusy = !!(d.busy);
         if (serverBusy) {
           setBusy(true);
@@ -1521,61 +1322,24 @@ inputEl.addEventListener("keydown", function(e){
 });
 inputEl.addEventListener("input", resizeInput);
 inputEl.addEventListener("focus", function(){ if (!hasMessages) connEl.textContent = "connected"; });
-newBtn.addEventListener("click", function(){ createSession(false); });
 
-/* ---------- tools on/off 切替 ---------- */
-toolsBadge.addEventListener("click", function(){
-  fetch("/api/tools", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ allow: !allowTools })
-  }).then(function(r){ return r.json().catch(function(){ return null; }); })
-    .then(function(d){ if (d && d.ok) { allowTools = !!d.allowTools; updateToolsBadge(); } });
-});
-
-/* ---------- サイドバー表示/非表示 ---------- */
-function applySidebar(show) {
-  var sb = document.getElementById("sidebar");
-  var fab = document.getElementById("sideToggle");
-  var xbtn = document.getElementById("sideClose");
-  if (sb) sb.classList.toggle("hidden", !show);
-  // ハンバーガーと × は常に同じ位置(左上)に固定。表示だけ入れ替える。
-  if (fab) fab.classList.toggle("on", !show);
-  if (xbtn) xbtn.classList.toggle("on", show);
-  try{ localStorage.setItem("aiagent.sidebar", show ? "1" : "0"); }catch(e){}
+/* ---------- テーマ切替 (設定モーダルの Colorscheme で変更) ---------- */
+function currentTheme(){
+  return document.documentElement.getAttribute("data-theme") || "dark";
 }
-function initSidebar() {
-  var v = "1";
-  try{ v = localStorage.getItem("aiagent.sidebar") || "1"; }catch(e){}
-  applySidebar(v !== "0");
+function setTheme(t){
+  if (t !== "light") t = "dark";
+  document.documentElement.setAttribute("data-theme", t);
+  try{ localStorage.setItem("aiagent.theme", t); }catch(e){}
+  var el = settingsEls.theme;
+  if (el) el.value = t;
 }
-sideToggle.addEventListener("click", function(){ applySidebar(true); });   // ハンバーガー→表示
-document.getElementById("sideClose").addEventListener("click", function(){ applySidebar(false); }); // ×→非表示
-
-/* ---------- テーマ切替 ---------- */
-(function(){
-  var btn = document.getElementById("themeBtn");
-  function applyIcon(){
-    var t = document.documentElement.getAttribute("data-theme");
-    var isLight = (t === "light");
-    btn.textContent = "colorscheme " + (isLight ? "light" : "dark"); // 現在の状態
-    btn.title = isLight ? "ダークに切替" : "ライトに切替";
-  }
-  function setTheme(t){
-    document.documentElement.setAttribute("data-theme", t);
-    localStorage.setItem("aiagent.theme", t);
-    applyIcon();
-  }
-  btn.addEventListener("click", function(){
-    var cur = document.documentElement.getAttribute("data-theme") || "dark";
-    setTheme(cur === "light" ? "dark" : "light");
-  });
-  applyIcon();
-})();
 
 
 /* ---------- 設定 (Web UI から agentweb.json を編集) ---------- */
 var SETTINGS_FIELDS = [
+  { k:"theme",            label:"Colorscheme",          type:"select", client:true,
+    options:[{v:"dark",t:"dark"},{v:"light",t:"light"}] },
   { k:"model",            label:"Model",                type:"text" },
   { k:"llmApiUrl",        label:"LLM API URL",          type:"text", full:true },
   { k:"llmApiKey",        label:"API Key",              type:"password", full:true },
@@ -1609,6 +1373,14 @@ var settingsOriginPort = null;
     var el;
     if (f.type === "textarea") {
       el = document.createElement("textarea");
+    } else if (f.type === "select") {
+      el = document.createElement("select");
+      (f.options || []).forEach(function(o){
+        var op = document.createElement("option");
+        op.value = o.v;
+        op.textContent = o.t;
+        el.appendChild(op);
+      });
     } else {
       el = document.createElement("input");
       el.type = (f.type === "bool") ? "checkbox" : f.type;
@@ -1628,6 +1400,12 @@ var settingsOriginPort = null;
       wrap.appendChild(lb2);
       wrap.appendChild(el);
     }
+    if (f.type === "select") {
+      // 選択した時点で即時に反映する（テーマはブラウザ側の設定なので保存を待たない）
+      el.addEventListener("change", function(){
+        if (f.client) setTheme(el.value);
+      });
+    }
     settingsBody.appendChild(wrap);
     settingsEls[f.k] = el;
   });
@@ -1641,6 +1419,11 @@ function openSettings(){
       var c = d.config || {};
       SETTINGS_FIELDS.forEach(function(f){
         var el = settingsEls[f.k];
+        if (f.client) {
+          // テーマは agentweb.json ではなくブラウザに保存している
+          el.value = currentTheme();
+          return;
+        }
         var v = c[f.k];
         if (f.type === "bool") el.checked = !!v;
         else el.value = (v == null) ? "" : String(v);
@@ -1663,6 +1446,7 @@ function updateSessButtons(){
     if (sessItems[i].id === sessSelId) { has = true; break; }
   }
   sessAutotitle.disabled = !has;
+  if (sessRenameBtn) sessRenameBtn.disabled = !has;
   sessDeleteBtn.disabled = !has;
 }
 
@@ -1718,13 +1502,22 @@ sessAutotitle.addEventListener("click", function(){
   autoTitle(sessSelId, sessAutotitle);
 });
 
+// 選択中セッションのタイトルを取り出す
+function sessTitleOf(id) {
+  for (var i = 0; i < sessItems.length; i++) {
+    if (sessItems[i].id === id) return sessItems[i].title || "";
+  }
+  return "";
+}
+
+sessRenameBtn.addEventListener("click", function(){
+  if (!sessSelId) return;
+  startRename(sessSelId, sessTitleOf(sessSelId));
+});
+
 sessDeleteBtn.addEventListener("click", function(){
   if (!sessSelId) return;
-  var title = "";
-  for (var i = 0; i < sessItems.length; i++) {
-    if (sessItems[i].id === sessSelId) { title = sessItems[i].title || ""; break; }
-  }
-  deleteSession(sessSelId, title);
+  deleteSession(sessSelId, sessTitleOf(sessSelId));
 });
 
 sessNewBtn.addEventListener("click", function(){
@@ -1735,6 +1528,7 @@ sessNewBtn.addEventListener("click", function(){
 function saveSettings(){
   var body = {};
   SETTINGS_FIELDS.forEach(function(f){
+    if (f.client) return;   // テーマはブラウザ側の設定なので保存しない
     var el = settingsEls[f.k];
     if (f.type === "bool") body[f.k] = el.checked;
     else if (f.type === "number") body[f.k] = parseInt(el.value, 10) || 0;
@@ -1752,10 +1546,9 @@ function saveSettings(){
       btn.disabled = false;
       if (!d || !d.ok) { alert("設定の保存に失敗しました: " + ((d && d.message) || "不明なエラー")); return; }
       closeSettings();
-      // ツール可否は即時反映されるのでバッジを更新
+      // ツール可否は即時反映される(メイン画面にはバッジが無い)
       if (d.config && typeof d.config.allowTools === "boolean") {
         allowTools = d.config.allowTools;
-        updateToolsBadge();
       }
       if (settingsOriginPort != null && d.config && d.config.port !== settingsOriginPort) {
         alert("ポート番号を変更しました。反映には agentweb.exe の再起動が必要です。");
@@ -1778,7 +1571,6 @@ resizeInput();
 inputEl.focus();
 emptyState(true);
 sendBtn.disabled = false;
-initSidebar();
 initServerState(); // サーバ状態を反映しつつセッションを読み込む
 </script>
 </body>
