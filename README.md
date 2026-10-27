@@ -7,6 +7,7 @@ Windows に同梱の **`csc.exe`（C# 5 / .NET Framework 4.5）** でコンパ�
 - OpenAI 互換 LLM API 連携 + ツール実行（shell / read_file / write_file / list_dir / curl）
 - **コンソールアプリ**として常駐起動（`aw.exe` を実行するだけ）、スタートアップ登録も可能
 - セッション管理（AppData 永続化・サイドバー）と pi 方式のコンパクション
+- 各メッセージ右上の**コピーボタン**で内容をクリップボードへコピー（普段は非表示・ホバーで表示）
 - 社内プロキシ対応 / ダーク・ライトテーマ / Mermaid 描画
 
 ## 構成

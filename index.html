@@ -188,6 +188,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .msg { display: flex; gap: 12px; align-items: flex-start; }
   .msg.user { flex-direction: row-reverse; }
   .bubble {
+    position: relative;
     max-width: 78%;
     padding: 7px 10px;
     border-radius: var(--radius);
@@ -196,6 +197,26 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     word-wrap: break-word;
     overflow-wrap: anywhere;
   }
+  /* メッセージ内容のコピーボタン(右上・普段は非表示) */
+  .copy-btn {
+    position: absolute;
+    top: 2px; right: 2px;
+    width: 18px; height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+    line-height: 1;
+    cursor: pointer;
+    display: grid; place-items: center;
+    opacity: 0;
+    transition: opacity .12s ease;
+  }
+  .msg:hover .copy-btn, .copy-btn:focus { opacity: .5; }
+  .copy-btn:hover { opacity: 1; background: var(--panel-3); color: var(--text); }
+  .msg.user .copy-btn:hover { background: rgba(0,0,0,.12); color: #0b1220; }
+  .copy-btn.copied { opacity: 1; color: var(--accent); }
   .ts {
     font-size: 10px;
     color: var(--muted);
@@ -620,12 +641,59 @@ function fmtNow() {
        + " " + p(d.getHours()) + ":" + p(d.getMinutes());
 }
 
-function bubble(role, text, ts) {
+var COPY_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+var CHECK_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>';
+
+// クリップボードへコピー（失敗時は execCommand にフォールバック）
+function copyToClipboard(text, btn) {
+  function done() {
+    if (!btn) return;
+    btn.classList.add("copied");
+    btn.innerHTML = CHECK_ICON;
+    btn.title = "コピーしました";
+    setTimeout(function(){
+      btn.classList.remove("copied");
+      btn.innerHTML = COPY_ICON;
+      btn.title = "内容をコピー";
+    }, 1200);
+  }
+  function fallback() {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { }
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
+function bubble(role, text, ts, rawText) {
   var row = document.createElement("div");
   row.className = "msg " + role;
   var b = document.createElement("div");
   b.className = "bubble";
   b.innerHTML = text;
+  b._copyText = (rawText == null) ? b.textContent : rawText;
+
+  var cbtn = document.createElement("button");
+  cbtn.type = "button";
+  cbtn.className = "copy-btn";
+  cbtn.title = "内容をコピー";
+  cbtn.innerHTML = COPY_ICON;
+  cbtn.addEventListener("click", function(ev){
+    ev.stopPropagation();
+    copyToClipboard(String(b._copyText == null ? b.textContent : b._copyText), cbtn);
+  });
+  b.appendChild(cbtn);
+
   if (ts) {
     var tsp = document.createElement("div");
     tsp.className = "ts";
@@ -638,11 +706,11 @@ function bubble(role, text, ts) {
 }
 
 function userMsg(text, ts) {
-  var el = bubble("user", escapeHtml(text), ts || fmtNow());
+  var el = bubble("user", escapeHtml(text), ts || fmtNow(), text);
   return el;
 }
 function assistantMsg(md, ts) {
-  var el = bubble("assistant", '<div class="md">' + renderMarkdown(md) + '</div>', ts || fmtNow());
+  var el = bubble("assistant", '<div class="md">' + renderMarkdown(md) + '</div>', ts || fmtNow(), md);
   return el;
 }
 function addTyping() {
@@ -984,6 +1052,7 @@ function send() {
     if (!force && now - lastPaint < 40) return;
     lastPaint = now;
     mdEl.innerHTML = renderMarkdown(fullText);
+    bubbleEl._copyText = fullText;   // コピー用に生のマークダウンを保持
     scrollBottom();
   }
 
