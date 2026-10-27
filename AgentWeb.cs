@@ -2045,6 +2045,8 @@ namespace AgentWeb
                             }
                             if (name.Length == 0 && fn != null) name = ToolExecutor.InferName(fn, argsJson);
                             if (fn != null && name.Length > 0) fn["name"] = name;
+                            Console.WriteLine("[agent] stream tool_call[" + k + "] name=" + name
+                                + " args=" + (argsJson.Length > 300 ? argsJson.Substring(0, 300) : argsJson));
                             string tdetail = ToolDetail(name, argsJson);
                             AgentProgress.Add("ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
                             if (emit != null) emit("tool", "{ \"name\" : \"" + JsonEscape(name) + "\", \"detail\" : \"" + JsonEscape(tdetail) + "\" }");

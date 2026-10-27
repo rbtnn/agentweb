@@ -1041,6 +1041,40 @@ function send() {
     waitEl = null;
   }
 
+  // ツール実行の表示: SSE の tool イベントに加え、/api/health の progress を定期取得して
+  // 取りこぼしがあっても必ず表示されるようにする(サーバ状態が唯一の真実)。
+  var progTimer = null;
+  function renderProgressList(list) {
+    if (!list || !list.length) return;
+    var html = "";
+    for (var i = 0; i < list.length; i++) {
+      var s = String(list[i]);
+      var m = s.match(/^ツール実行:\s+(.*?)\s{2,}([\s\S]*)$/);
+      if (m) {
+        html += '<div class="pstep">▶ ツール実行: ' + escapeHtml(m[1]) + '</div>' +
+                '<div class="pdetail">' + escapeHtml(m[2]) + '</div>';
+      } else {
+        html += '<div class="pstep">▶ ' + escapeHtml(s) + '</div>';
+      }
+    }
+    prog.innerHTML = html;
+    prog.style.display = "block";
+    scrollBottom();
+  }
+  function pollProgress() {
+    fetch("/api/health")
+      .then(function(r){ return r.json().catch(function(){ return null; }); })
+      .then(function(h){ if (h) renderProgressList(h.progress); })
+      .catch(function(){});
+  }
+  function startProgressPoll() {
+    if (!progTimer) progTimer = setInterval(pollProgress, 1200);
+  }
+  function stopProgressPoll() {
+    if (progTimer) { clearInterval(progTimer); progTimer = null; }
+  }
+  startProgressPoll();
+
   // 思考(thinking)ブロック: reasoning トークンが来たら生成
   var thinkEl = null, thinkBody = null, thinkText = "";
   function ensureThink() {
@@ -1102,13 +1136,17 @@ function send() {
         prog.innerHTML = '<div class="pstep">▶ ツール実行: ' + _nm + '</div>' +
                          (_dt ? '<div class="pdetail">' + _dt + '</div>' : '');
         scrollBottom();
+        pollProgress();   // サーバ側の進捗リストで確定させる
       }
       else if (ev === "error" && d) {
         hideWait();
+        stopProgressPoll();
         bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ ' + escapeHtml(String(d.message||"エラー")) + '</div></div>';
       }
       else if (ev === "done" && d) {
         hideWait();
+        pollProgress();          // 最後の進捗を反映
+        stopProgressPoll();
         if (thinkEl) thinkEl.open = false;   // 完了時に思考を折りたたむ
         if (d.session) { sessionId = d.session; localStorage.setItem("aiagent.session", sessionId); }
         refreshSessions();
@@ -1136,11 +1174,12 @@ function send() {
     return pump();
   }).then(function(){ paint(true); })
     .catch(function(err){
+      stopProgressPoll();
       bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ 通信エラー: ' + escapeHtml(String(err)) + '</div></div>';
       refreshSessions();
       connEl.textContent = "disconnected"; connEl.style.color = "#f87171";
     })
-    .then(function(){ stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessions(); connEl.textContent="connected"; connEl.style.color="#4ade80"; });
+    .then(function(){ stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessions(); connEl.textContent="connected"; connEl.style.color="#4ade80"; });
 }
 
 /* ---------- events ---------- */
