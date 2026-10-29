@@ -694,6 +694,20 @@ def run(keep=False):
             else:
                 fail("生成完了後も turn が残っています: %r" % t)
 
+            # 新規作成すると、そのセッションが「最後に開いていたセッション」になる
+            created = http_json(base5 + "/api/sessions", {})
+            new_id = created.get("session") or ""
+            if new_id and http_json(base5 + "/api/health").get("lastSession") == new_id:
+                ok("新規作成したセッションが lastSession になります")
+            else:
+                fail("新規作成が lastSession に反映されません: %r"
+                     % http_json(base5 + "/api/health").get("lastSession"))
+            if new_id and any(x["id"] == new_id for x in
+                              (http_json(base5 + "/api/sessions").get("sessions") or [])):
+                ok("新規作成したセッションが一覧に現れます")
+            else:
+                fail("新規作成したセッションが一覧にありません: %r" % new_id)
+
             # 最後に開いたセッション
             lst = http_json(base5 + "/api/sessions").get("sessions") or []
             ids = [x["id"] for x in lst]

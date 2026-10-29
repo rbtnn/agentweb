@@ -1020,7 +1020,12 @@ function deleteSession(id, title) {
     .catch(function(){})
     .then(function(){
       // 表示中のセッションを消した時だけ会話も作り直す(それ以外は一覧だけ更新)
-      if (id === sessionId) refreshSessions();
+      if (id === sessionId) {
+        // 消した ID は選択候補に残さない(lastSession に残っていても無視される)
+        sessionId = "";
+        if (serverLastSession === id) serverLastSession = "";
+        refreshSessions();
+      }
       else refreshSettingsSessions();
       return true;
     });
@@ -1112,17 +1117,20 @@ function updateActiveItem() {
   updateSessButtons();
 }
 
-function refreshSessions() {
+// want: 明示的に選びたいセッションID。指定時はそれを最優先する
+// (新規作成直後など、サーバ側の lastSession より優先したい場合に使う)
+function refreshSessions(want) {
   fetch("/api/sessions")
     .then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
       if (!d || !d.ok) { emptyChat(); return; }
       var sessions = d.sessions || [];
       // 再開先の優先順位:
-      //   1. サーバに記録された「最後に開いていたセッション」(ブラウザを閉じても残る)
-      //   2. ブラウザの localStorage
-      //   3. 一覧の先頭
-      var candidates = [serverLastSession, sessionId];
+      //   1. 呼び出し側が明示した ID(新規作成直後など)
+      //   2. サーバに記録された「最後に開いていたセッション」(ブラウザを閉じても残る)
+      //   3. ブラウザの localStorage
+      //   4. 一覧の先頭
+      var candidates = [want, serverLastSession, sessionId];
       var target = "";
       for (var i = 0; i < candidates.length && !target; i++) {
         var c = candidates[i];
@@ -1150,12 +1158,16 @@ function createSession(silent) {
   return fetch("/api/sessions", { method: "POST" })
     .then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
-      if (d && d.ok) {
-        sessionId = d.session;
-        localStorage.setItem("aiagent.session", sessionId);
-        emptyChat();
-        refreshSessions();
-      }
+      if (!d || !d.ok) return;
+      sessionId = d.session;
+      localStorage.setItem("aiagent.session", sessionId);
+      // 新しいセッションを「最後に開いていたセッション」としても記録する。
+      // これをしないと refreshSessions() が古い lastSession を選び直してしまう。
+      saveUiState({ session: sessionId });
+      serverLastSession = sessionId;
+      emptyChat();
+      // 明示的に新しいセッションを選ばせる(lastSession より優先)
+      refreshSessions(sessionId);
     })
     .catch(function(){});
 }

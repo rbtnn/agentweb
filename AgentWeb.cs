@@ -1019,6 +1019,9 @@ namespace AgentWeb
             {
                 store.Save(id, new List<object>(), "新規会話");
             }
+            // 新規セッションを「最後に開いていたセッション」として記録する
+            // (リロード/再起動しても新規セッションから再開できるようにするため)
+            store.SetLastSessionId(id);
             Dictionary<string, object> d = new Dictionary<string, object>();
             d["ok"] = true;
             d["session"] = id;
