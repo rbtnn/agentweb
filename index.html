@@ -941,10 +941,13 @@ function resizeInput() {
 var busy = false;
 var hasMessages = false;
 var serverBusy = false;   // サーバ側の処理中フラグ (/api/health の busy)
+var streamingHere = false; // このタブが実際に SSE を受信して描画中か(途中経過の取り込み制御)
 var busyTimer = null;     // 処理中ステータスのポーリングタイマー
 
 // 現在のセッションID (ローカルに保持、サーバ管理のセッションと紐付け)
 var sessionId = localStorage.getItem("aiagent.session") || "";
+var serverLastSession = "";   // サーバに記録された「最後に開いていたセッション」
+var draftTimer = null;        // 下書き保存のデバウンス用
 
 function emptyChat() { chatEl.innerHTML = ""; hasMessages = false; emptyState(true); }
 
@@ -1025,16 +1028,28 @@ function deleteSession(id, title) {
 }
 
 // 取得済みメッセージ [{role,content},...] を表示に反映
-function loadSession(messages) {
+function loadSession(messages, turn) {
   hasMessages = false;
   thinkBodyRef = null;          // 会話を作り直すので思考本文への参照も解除
   chatEl.innerHTML = "";
-  if (!messages || messages.length === 0) { emptyState(true); return; }
-  emptyState(false); hasMessages = true;
-  messages.forEach(function(m){
-    if (m.role === "user") userMsg(m.content, m.ts);
-    else if (m.role === "assistant") assistantMsg(m.content, m.ts, m.steps, m.think);
-  });
+  if (!messages || messages.length === 0) {
+    // 生成中で、まだ何も保存されていない場合でも途中経過を出せるようにする
+    if (turn && (turn.content || turn.think || (turn.steps && turn.steps.length))) {
+      emptyState(false); hasMessages = true;
+    } else { emptyState(true); return; }
+  } else {
+    emptyState(false); hasMessages = true;
+    messages.forEach(function(m){
+      if (m.role === "user") userMsg(m.content, m.ts);
+      else if (m.role === "assistant") assistantMsg(m.content, m.ts, m.steps, m.think);
+    });
+  }
+  // 生成中のターン(サーバ側で保持している途中経過)を復元する。
+  // リロードしても「生成途中から」表示を再開できる。
+  if (turn && (turn.content || turn.think || (turn.steps && turn.steps.length))) {
+    var last = assistantMsg(turn.content || "", fmtNow(), turn.steps, turn.think);
+    thinkBodyRef = last.querySelector(".think-body") || null;
+  }
   if (serverBusy) ensureTyping();
   scrollBottom();
   // 履歴の思考ブロックは最新部分(最下部)を表示しておく
@@ -1042,11 +1057,24 @@ function loadSession(messages) {
   for (var ti = 0; ti < tbs.length; ti++) tbs[ti].scrollTop = tbs[ti].scrollHeight;
 }
 
+// 生成中の途中経過を取り込むための再取得。
+// 会話を作り直すので、スクロール位置は最下部へ合わせる。
+function refreshSessionQuiet() {
+  if (!sessionId) return;
+  fetch("/api/sessions/" + encodeURIComponent(sessionId))
+    .then(function(r){ return r.json().catch(function(){ return null; }); })
+    .then(function(d){
+      if (!d || !d.ok) return;
+      loadSession(d.messages || [], d.turn || null);
+    })
+    .catch(function(){});
+}
+
 function fetchSession(id) {
   fetch("/api/sessions/" + encodeURIComponent(id))
     .then(function(r){ return r.json().catch(function(){ return null; }); })
     .then(function(d){
-      if (d && d.ok) loadSession(d.messages || []);
+      if (d && d.ok) loadSession(d.messages || [], d.turn || null);
       else emptyChat();
     })
     .catch(function(){ emptyChat(); });
@@ -1056,8 +1084,21 @@ function selectSession(id) {
   if (!id || busy) return;
   sessionId = id;
   localStorage.setItem("aiagent.session", id);
+  saveUiState({ session: id });   // サーバ側にも記録(ブラウザを閉じても復元できる)
   updateActiveItem();   // 一覧の active を即時更新(再描画しない)
   fetchSession(id);
+}
+
+// UI の状態(下書き / 選択中セッション)をサーバ側へ保存する。
+// localStorage が消えても再開できるようにするため。
+function saveUiState(obj) {
+  try {
+    fetch("/api/ui", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(obj)
+    }).catch(function(){});
+  } catch(e) {}
 }
 
 // 現在の sessionId に合わせてドロップダウンの選択を付け替える
@@ -1078,14 +1119,23 @@ function refreshSessions() {
     .then(function(d){
       if (!d || !d.ok) { emptyChat(); return; }
       var sessions = d.sessions || [];
-      var exists = sessions.some(function(s){ return s.id === sessionId; });
-      var target = sessionId;
-      if (!exists) {
+      // 再開先の優先順位:
+      //   1. サーバに記録された「最後に開いていたセッション」(ブラウザを閉じても残る)
+      //   2. ブラウザの localStorage
+      //   3. 一覧の先頭
+      var candidates = [serverLastSession, sessionId];
+      var target = "";
+      for (var i = 0; i < candidates.length && !target; i++) {
+        var c = candidates[i];
+        if (c && sessions.some(function(s){ return s.id === c; })) target = c;
+      }
+      if (!target) {
         if (sessions.length > 0) target = sessions[0].id; // 最近のセッションへ
         else { createSession(true); return; }              // 1つも無ければ作成
       }
       sessionId = target;
       localStorage.setItem("aiagent.session", target);
+      saveUiState({ session: target });
       refreshSettingsSessions(target);   // セッション欄の選択も合わせる
       fetchSession(target);
     })
@@ -1166,6 +1216,9 @@ function pollServerBusy() {
         setBusy(true);
         ensureTyping();
         renderProgress(d && d.progress);
+        // このタブが描画していない(=リロード後など)なら、
+        // サーバに保存されている途中経過を取り込んで表示を追従させる。
+        if (!streamingHere && sessionId) refreshSessionQuiet();
         startBusyPoll();
       } else {
         stopBusyPoll();
@@ -1186,7 +1239,20 @@ function initServerState() {
       if (d && d.ok) {
         allowTools = !(d.allowTools === false);
         renderModels(d.models || [], d.model || "");   // モデル一覧と選択中モデル
+        serverLastSession = d.lastSession || "";       // サーバ側の再開先
+        // 配色もサーバ側の設定に合わせる(ブラウザを変えても維持される)
+        fetch("/api/config").then(function(r){ return r.json().catch(function(){ return null; }); })
+          .then(function(cd){
+            if (cd && cd.ok && cd.config && cd.config.theme) setTheme(cd.config.theme);
+          }).catch(function(){});
         serverBusy = !!(d.busy);
+
+        // 入力途中のテキストを復元する(ブラウザを閉じても残る)
+        if (d.draft && !inputEl.value) {
+          inputEl.value = d.draft;
+          resizeInput();
+        }
+
         if (serverBusy) {
           setBusy(true);
           if (!document.getElementById("typing")) addTyping();
@@ -1205,8 +1271,10 @@ function send() {
   if (!hasMessages) { emptyState(false); hasMessages = true; }
   userMsg(text);
   inputEl.value = ""; resizeInput();
+  saveUiState({ draft: "" });   // 送信したので下書きは消す
   scrollBottom();
   setBusy(true);
+  streamingHere = true;   // このタブが描画を担当している
 
   thinkBodyRef = null;                            // 前のターンの思考本文への参照を解除
   var bubbleEl = assistantMsg("");                // 空の assistant 吹き出し
@@ -1384,7 +1452,7 @@ function send() {
       bubbleEl.innerHTML = '<div class="md"><div class="err">⚠ 通信エラー: ' + escapeHtml(String(err)) + '</div></div>';
       refreshSessionList();
     })
-    .then(function(){ stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessionList(); });
+    .then(function(){ streamingHere = false; stopProgressPoll(); stopBusyPoll(); serverBusy = false; setBusy(false); refreshSessionList(); });
 }
 
 /* ---------- events ---------- */
@@ -1395,7 +1463,15 @@ sendBtn.addEventListener("click", function(){
 inputEl.addEventListener("keydown", function(e){
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
-inputEl.addEventListener("input", resizeInput);
+inputEl.addEventListener("input", function(){
+  resizeInput();
+  // 入力途中のテキストをサーバ側にも保存する(リロード/再起動しても残る)
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = setTimeout(function(){
+    draftTimer = null;
+    saveUiState({ draft: inputEl.value });
+  }, 600);
+});
 
 /* ---------- テーマ切替 (設定モーダルの Colorscheme で変更) ---------- */
 function currentTheme(){
@@ -1404,9 +1480,19 @@ function currentTheme(){
 function setTheme(t){
   if (t !== "light") t = "dark";
   document.documentElement.setAttribute("data-theme", t);
+  // localStorage は起動時のちらつき防止キャッシュ。正はサーバ側(agentweb.json の theme)。
   try{ localStorage.setItem("aiagent.theme", t); }catch(e){}
   var el = settingsEls.theme;
   if (el) el.value = t;
+}
+
+// テーマをサーバ側へ保存する(ブラウザを変えても維持される)
+function saveTheme(t) {
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme: t })
+  }).catch(function(){});
 }
 
 
@@ -1487,7 +1573,7 @@ var settingsOriginPort = null;
     if (f.type === "select") {
       // 選択した時点で即時に反映する（テーマはブラウザ側の設定なので保存を待たない）
       el.addEventListener("change", function(){
-        if (f.client) setTheme(el.value);
+        if (f.client) { setTheme(el.value); saveTheme(el.value); }
       });
     }
     settingsBody.appendChild(wrap);
@@ -1636,8 +1722,8 @@ function openSettings(){
       SETTINGS_FIELDS.forEach(function(f){
         var el = settingsEls[f.k];
         if (f.client) {
-          // テーマは agentweb.json ではなくブラウザに保存している
-          el.value = currentTheme();
+          // テーマはサーバ側(agentweb.json の theme)が正。無ければ現在の表示に合わせる
+          el.value = (c.theme === "light" || c.theme === "dark") ? c.theme : currentTheme();
           return;
         }
         var v = c[f.k];

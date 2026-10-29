@@ -126,6 +126,40 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+class _SlowHandler(http.server.BaseHTTPRequestHandler):
+    """ゆっくりトークンを返すモック。生成中の途中経過の保存を検証するために使う。"""
+    protocol_version = "HTTP/1.1"
+    hits = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        req = json.loads(self.rfile.read(n).decode("utf-8", "replace") or "{}")
+        _SlowHandler.hits.append(req)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def chunk(delta, fin=None):
+            c = {"id": "c", "object": "chat.completion.chunk", "created": 1, "model": "mock",
+                 "choices": [{"index": 0, "delta": delta, "finish_reason": fin}]}
+            self.wfile.write(("data: " + json.dumps(c, ensure_ascii=False) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+
+        chunk({"role": "assistant"})
+        chunk({"reasoning_content": "考え中その1。"}); time.sleep(0.4)
+        chunk({"reasoning_content": "考え中その2。"}); time.sleep(0.4)
+        chunk({"content": "前半の"}); time.sleep(0.6)
+        chunk({"content": "本文です。"}); time.sleep(0.6)
+        chunk({}, "stop")
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+
 class _TagHandler(http.server.BaseHTTPRequestHandler):
     """複数モデルのテスト用。どのサーバが呼ばれたか(tag)を記録する。"""
     protocol_version = "HTTP/1.1"
@@ -187,6 +221,13 @@ def start_mock(plain=False):
 # --------------------------------------------------------------------------
 #  ヘルパ
 # --------------------------------------------------------------------------
+
+def start_slow_mock():
+    srv = _Server(("127.0.0.1", 0), _SlowHandler)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, port
+
 
 def start_tag_mock(tag):
     """tag ごとに独立したモックサーバを立てる。"""
@@ -520,6 +561,175 @@ def run(keep=False):
             for m in (msa, msb):
                 m.shutdown()
                 m.server_close()
+
+        # --- ケース 5: 再開（下書き・最後のセッション・配色・生成途中の途中経過） ---
+        _SlowHandler.hits = []
+        mss, mps = start_slow_mock()
+        port5 = _free_port()
+        cfg5 = os.path.join(tmp, "agentweb5.json")
+        with open(cfg5, "w", encoding="utf-8") as f:
+            json.dump({
+                "llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % mps,
+                "llmApiKey": "k", "model": "mock",
+                "allowTools": False, "emitReasoning": True, "theme": "dark",
+            }, f, ensure_ascii=False)
+        env5 = dict(os.environ)
+        for k in ("LLM_API_URL", "LLM_API_KEY", "LLM_MODEL",
+                  "ALLOW_TOOLS", "LLM_EMIT_REASONING"):
+            env5.pop(k, None)
+        env5["LLM_USE_SYSTEM_PROXY"] = "0"
+        log5 = open(os.path.join(tmp, "server5.log"), "wb")
+        proc5 = subprocess.Popen(["mono", exe, "--config", cfg5, "--port", str(port5)],
+                                 env=env5, stdout=log5, stderr=subprocess.STDOUT,
+                                 cwd=tmp)
+        base5 = "http://127.0.0.1:%d" % port5
+
+        def restart5():
+            proc5.terminate()
+            try:
+                proc5.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc5.kill()
+            return subprocess.Popen(["mono", exe, "--config", cfg5, "--port", str(port5)],
+                                    env=env5, stdout=log5, stderr=subprocess.STDOUT,
+                                    cwd=tmp)
+
+        try:
+            _wait_up(base5)
+
+            # 配色はサーバ側に保存される
+            c = http_json(base5 + "/api/config")["config"]
+            if c.get("theme") == "dark":
+                ok("config に theme があります")
+            else:
+                fail("config に theme がありません: %r" % c.get("theme"))
+            http_json(base5 + "/api/config", {"theme": "light"})
+            if http_json(base5 + "/api/config")["config"].get("theme") == "light":
+                ok("theme がサーバ側に永続化されます")
+            else:
+                fail("theme が永続化されていません")
+
+            # 下書き
+            http_json(base5 + "/api/ui", {"draft": "書きかけのプロンプト"})
+            if http_json(base5 + "/api/health").get("draft") == "書きかけのプロンプト":
+                ok("下書きが保存され health から復元できます")
+            else:
+                fail("下書きが保存されていません")
+
+            # 生成中の途中経過がサーバに残る（接続を途中で切って模擬）
+            sid5 = ""
+            def stream_abort():
+                req = urllib.request.Request(base5 + "/api/chat/stream")
+                req.add_header("Content-Type", "application/json")
+                body = json.dumps({"message": "途中で切るテスト", "session": ""}).encode("utf-8")
+                n = 0
+                try:
+                    with urllib.request.urlopen(req, body, timeout=30) as r:
+                        for raw in r:
+                            if raw.decode("utf-8", "replace").startswith("data:"):
+                                n += 1
+                                if n > 2:
+                                    break      # ブラウザを閉じた状況を模擬
+                except Exception:
+                    pass
+
+            th = threading.Thread(target=stream_abort, daemon=True)
+            th.start()
+            inflight = None
+            for _ in range(80):
+                h = http_json(base5 + "/api/health")
+                if h.get("busy") and (h.get("turn") or {}).get("content"):
+                    inflight = h
+                    break
+                time.sleep(0.1)
+            if inflight:
+                ok("生成中は /api/health の turn に途中の本文が入ります")
+                sid5 = (inflight.get("turn") or {}).get("session") or ""
+                if (inflight.get("turn") or {}).get("think", "").startswith("考え中"):
+                    ok("生成中は turn に途中の思考が入ります")
+                else:
+                    fail("turn の思考が想定と違います: %r"
+                         % (inflight.get("turn") or {}).get("think"))
+                if sid5:
+                    s5 = http_json(base5 + "/api/sessions/" + sid5)
+                    if (s5.get("turn") or {}).get("content"):
+                        ok("生成中でもセッション取得で turn が返ります")
+                    else:
+                        fail("生成中なのに turn が返りません: %r" % s5.get("turn"))
+            else:
+                fail("生成中の turn が取得できませんでした")
+            th.join(timeout=40)
+
+            # 完了後は turn が空になる
+            for _ in range(100):
+                h = http_json(base5 + "/api/health")
+                if not h.get("busy"):
+                    break
+                time.sleep(0.2)
+            t = h.get("turn") or {}
+            if not t.get("content"):
+                ok("生成完了後は turn が空になります")
+            else:
+                fail("生成完了後も turn が残っています: %r" % t)
+
+            # 最後に開いたセッション
+            lst = http_json(base5 + "/api/sessions").get("sessions") or []
+            ids = [x["id"] for x in lst]
+            if ids and not any(i.startswith("_") for i in ids):
+                ok("_state.json はセッション一覧に含まれません")
+            else:
+                fail("セッション一覧に内部ファイルが混ざっています: %r" % ids)
+            # 途中で切ったテストのセッションを対象にする(他のケースのセッションと混ざらないように)
+            last = sid5 or (ids[0] if ids else "")
+            if last:
+                http_json(base5 + "/api/sessions/" + last)   # GET で lastSession が記録される
+                if http_json(base5 + "/api/health").get("lastSession") == last:
+                    ok("最後に開いたセッションが記録されます")
+                else:
+                    fail("lastSession が記録されていません")
+
+            # サーバ再起動後も復元できる
+            proc5 = restart5()
+            _wait_up(base5)
+            h = http_json(base5 + "/api/health")
+            if h.get("lastSession") == last:
+                ok("再起動後も lastSession が残ります")
+            else:
+                fail("再起動後に lastSession が失われました: %r" % h.get("lastSession"))
+            if http_json(base5 + "/api/config")["config"].get("theme") == "light":
+                ok("再起動後も theme が残ります")
+            else:
+                fail("再起動後に theme が失われました")
+            if last:
+                s5 = http_json(base5 + "/api/sessions/" + last)
+                msgs = s5.get("messages") or []
+                am = [m for m in msgs if m.get("role") == "assistant"]
+                if any(m.get("role") == "user" for m in msgs) and am:
+                    ok("再起動後も会話(ユーザー/アシスタント)が残ります")
+                else:
+                    fail("再起動後に会話が失われました: %r" % msgs)
+                if am and "本文" in (am[-1].get("content") or ""):
+                    ok("途中で切っても応答本文が欠けていません")
+                else:
+                    fail("応答本文が欠けています: %r" % (am[-1].get("content") if am else None))
+                if am and (am[-1].get("think") or "").startswith("考え中"):
+                    ok("途中で切っても思考が保存されています")
+                else:
+                    fail("思考が保存されていません: %r"
+                         % (am[-1].get("think") if am else None))
+            if proc5.poll() is None:
+                ok("再開テストでサーバが落ちませんでした")
+            else:
+                fail("再開テストでサーバが落ちました")
+        finally:
+            try:
+                proc5.terminate()
+                proc5.wait(timeout=10)
+            except Exception:
+                proc5.kill()
+            log5.close()
+            mss.shutdown()
+            mss.server_close()
 
         return 1 if fails else 0
     finally:

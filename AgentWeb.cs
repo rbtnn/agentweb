@@ -134,6 +134,7 @@ namespace AgentWeb
         public string BindPath;            // 公開ディレクトリ (Web UI 静的ファイル)
         public string ConfigPath;          // 設定ファイル(agentweb.json)のパス
         public bool OpenBrowserOnStart;    // 起動時にブラウザを開くか
+        public string Theme;               // 配色 ("dark" / "light")。ブラウザを変えても維持する
 
         public Config() : this("") { }
 
@@ -161,6 +162,7 @@ namespace AgentWeb
             ReserveTokens = SafeInt(Env("LLM_RESERVE_TOKENS", "12000"), 12000);
             KeepRecentTokens = SafeInt(Env("LLM_KEEP_RECENT_TOKENS", "20000"), 20000);
             BindPath = Env("AI_BIND_PATH", AppDir());
+            Theme = Env("AGENTWEB_THEME", "dark");
             SystemPrompt = Env(
                 "AI_SYSTEM_PROMPT",
                 "あなたは親切な AI エージェントです。ユーザーの質問に日本語で簡潔に回答してください。"
@@ -235,6 +237,7 @@ namespace AgentWeb
             if (Has(m, "systemPrompt")) SystemPrompt = Json.AsString(Get(m, "systemPrompt"));
             if (Has(m, "bindPath")) BindPath = Json.AsString(Get(m, "bindPath"));
             if (Has(m, "openBrowserOnStart")) OpenBrowserOnStart = AsBool(Get(m, "openBrowserOnStart"));
+            if (Has(m, "theme")) Theme = Json.AsString(Get(m, "theme"));
             if (Has(m, "emitReasoning")) EmitReasoning = AsBool(Get(m, "emitReasoning"));
 
             // 選択中モデルの URL / APIキー / コンテキスト上限を実効値へ反映する
@@ -265,6 +268,7 @@ namespace AgentWeb
             m["systemPrompt"] = SystemPrompt;
             m["bindPath"] = BindPath;
             m["openBrowserOnStart"] = OpenBrowserOnStart;
+            m["theme"] = Theme;
             return m;
         }
 
@@ -564,6 +568,8 @@ namespace AgentWeb
                 return HandleSetConfig(req);
             if (req.Method == "POST" && path == "/api/model")
                 return HandleSetModel(req);
+            if (req.Method == "POST" && path == "/api/ui")
+                return HandleSetUi(req);
             if (req.Method == "GET" && path == "/api/tools")
                 return HandleTools();
             if (req.Method == "GET" && path == "/api/diag/tools")
@@ -966,6 +972,44 @@ namespace AgentWeb
             return JsonResponse(200, d);
         }
 
+        // UI の状態(下書きテキスト / 最後に開いたセッション)を保存する。
+        // ブラウザを閉じても入力途中・選択中セッションが残るようにするため。
+        HttpResponse HandleSetUi(HttpRequest req)
+        {
+            Dictionary<string, object> m = null;
+            if (req.Body != null && req.Body.Length > 0)
+            {
+                try
+                {
+                    object o = Json.Parse(Encoding.UTF8.GetString(req.Body));
+                    m = o as Dictionary<string, object>;
+                }
+                catch (Exception ex)
+                {
+                    return JsonResponse(400, MakeError("bad_request", "リクエストの解析に失敗しました: " + ex.Message));
+                }
+            }
+
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["ok"] = true;
+
+            if (m != null)
+            {
+                if (m.ContainsKey("draft"))
+                {
+                    store.SetDraft(Json.AsString(m["draft"]));
+                    d["draft"] = store.Draft();
+                }
+                if (m.ContainsKey("session"))
+                {
+                    string sid = Json.AsString(m["session"]).Trim();
+                    if (sid.Length > 0) store.SetLastSessionId(sid);
+                    d["lastSession"] = store.LastSessionId();
+                }
+            }
+            return JsonResponse(200, d);
+        }
+
         HttpResponse HandleHealth()
         {
             Dictionary<string, object> d = new Dictionary<string, object>();
@@ -980,6 +1024,9 @@ namespace AgentWeb
             d["busy"] = busy;
             if (busy && busySession != null) d["busySession"] = busySession;
             d["progress"] = AgentProgress.Snapshot();
+            d["lastSession"] = store.LastSessionId();     // 再開用
+            d["draft"] = store.Draft();                   // 入力途中のテキスト
+            d["turn"] = TurnState.Snapshot();             // 生成中の途中経過
             d["proxy"] = (config.ProxyUrl != null && config.ProxyUrl.Trim().Length > 0)
                 ? config.ProxyUrl.Trim()
                 : (config.UseSystemProxy ? "system" : "off");
@@ -1102,6 +1149,14 @@ namespace AgentWeb
             d["id"] = id;
             d["title"] = (meta != null && meta.ContainsKey("title")) ? Json.AsString(meta["title"]) : "新規会話";
             d["messages"] = view;
+
+            // このセッションが生成中なら、途中経過(本文/思考/ツール実行)も返す。
+            // リロードしても「生成途中から」表示を再開できるようにするため。
+            Dictionary<string, object> turn = TurnState.SnapshotOf(id);
+            if (turn != null) d["turn"] = turn;
+
+            // 選択中セッションとして記録しておく(次回起動時に復元)
+            store.SetLastSessionId(id);
             return JsonResponse(200, d);
         }
 
@@ -1519,6 +1574,8 @@ namespace AgentWeb
             {
                 foreach (string f in Directory.GetFiles(sessionsDir, "*.json"))
                 {
+                    // _state.json (最後に開いたセッション / 下書き) は一覧に含めない
+                    if (Path.GetFileName(f).StartsWith("_")) continue;
                     try
                     {
                         object o = Json.Parse(File.ReadAllText(f, Encoding.UTF8));
@@ -1556,6 +1613,90 @@ namespace AgentWeb
             File.WriteAllText(FileOf(id), Json.ToString(meta), Encoding.UTF8);
             return true;
         }
+
+        // ---------------- 最後に開いていたセッション (再開用) ----------------
+        // ブラウザを閉じても「続きから」始められるよう、選択中セッションを
+        // サーバ側にも保存しておく(ブラウザの localStorage が消えても復元できる)。
+
+        string StateFile()
+        {
+            return Path.Combine(sessionsDir, "_state.json");
+        }
+
+        public string LastSessionId()
+        {
+            try
+            {
+                string f = StateFile();
+                if (!File.Exists(f)) return "";
+                object o = Json.Parse(File.ReadAllText(f, Encoding.UTF8));
+                Dictionary<string, object> st = o as Dictionary<string, object>;
+                if (st == null || !st.ContainsKey("lastSession")) return "";
+                string id = Json.AsString(st["lastSession"]).Trim();
+                if (id.Length == 0) return "";
+                // 削除済みのセッションを指していたら無視する
+                if (!File.Exists(FileOf(id))) return "";
+                return id;
+            }
+            catch { return ""; }
+        }
+
+        public void SetLastSessionId(string id)
+        {
+            try
+            {
+                Dictionary<string, object> st = LoadState();
+                st["lastSession"] = Sanitize(id);
+                SaveState(st);
+            }
+            catch { }
+        }
+
+        // ---------------- UI の下書き (入力中のテキスト) ----------------
+        // リロードしても入力途中のプロンプトが残るようにする。
+        public string Draft()
+        {
+            try
+            {
+                Dictionary<string, object> st = LoadState();
+                if (!st.ContainsKey("draft")) return "";
+                return Json.AsString(st["draft"]);
+            }
+            catch { return ""; }
+        }
+
+        public void SetDraft(string text)
+        {
+            try
+            {
+                Dictionary<string, object> st = LoadState();
+                st["draft"] = (text == null) ? "" : text;
+                SaveState(st);
+            }
+            catch { }
+        }
+
+        Dictionary<string, object> LoadState()
+        {
+            try
+            {
+                string f = StateFile();
+                if (File.Exists(f))
+                {
+                    object o = Json.Parse(File.ReadAllText(f, Encoding.UTF8));
+                    Dictionary<string, object> st = o as Dictionary<string, object>;
+                    if (st != null) return st;
+                }
+            }
+            catch { }
+            return new Dictionary<string, object>();
+        }
+
+        void SaveState(Dictionary<string, object> st)
+        {
+            Directory.CreateDirectory(sessionsDir);
+            File.WriteAllText(StateFile(), Json.ToString(st), Encoding.UTF8);
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -1586,6 +1727,88 @@ namespace AgentWeb
     }
 
     // エージェント進行状況(busy中にWeb UIへツール実行などを表示する用)
+    // 生成中のターンの途中経過 (本文 / 思考 / ツール実行)。
+    // ブラウザを閉じても「続きから」表示できるよう、サーバ側で保持する。
+    static class TurnState
+    {
+        static string session = "";
+        static StringBuilder content = new StringBuilder();
+        static StringBuilder think = new StringBuilder();
+        static List<object> steps = new List<object>();
+        static object lck = new object();
+
+        public static void Begin(string sessionId)
+        {
+            lock (lck)
+            {
+                session = sessionId ?? "";
+                content = new StringBuilder();
+                think = new StringBuilder();
+                steps = new List<object>();
+            }
+        }
+        public static void End()
+        {
+            // 終わったターンの内容は残さない(health に古い途中経過が出ないようにする)
+            lock (lck)
+            {
+                session = "";
+                content = new StringBuilder();
+                think = new StringBuilder();
+                steps = new List<object>();
+            }
+        }
+        public static void AppendContent(string d)
+        {
+            if (d == null || d.Length == 0) return;
+            lock (lck) content.Append(d);
+        }
+        public static void AppendThink(string d)
+        {
+            if (d == null || d.Length == 0) return;
+            lock (lck) think.Append(d);
+        }
+        public static void AddStep(string s)
+        {
+            if (s == null || s.Length == 0) return;
+            lock (lck) steps.Add(s);
+        }
+
+        // 生成中のセッション ID(生成していなければ "")
+        public static string Session
+        {
+            get { lock (lck) { return session; } }
+        }
+
+        // 生成中のターンの途中経過(生成していなければ空)
+        public static Dictionary<string, object> Snapshot()
+        {
+            lock (lck)
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["session"] = session;
+                d["content"] = content.ToString();
+                d["think"] = think.ToString();
+                d["steps"] = new List<object>(steps);
+                return d;
+            }
+        }
+
+        // 指定セッションが生成中ならその途中経過、そうでなければ null
+        public static Dictionary<string, object> SnapshotOf(string sessionId)
+        {
+            lock (lck)
+            {
+                if (session.Length == 0 || session != (sessionId ?? "")) return null;
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["content"] = content.ToString();
+                d["think"] = think.ToString();
+                d["steps"] = new List<object>(steps);
+                return d;
+            }
+        }
+    }
+
     static class AgentProgress
     {
         static List<object> log = new List<object>();
@@ -1646,6 +1869,7 @@ namespace AgentWeb
             ctx.Messages.Add(Msg("user", userMessage));
             AgentProgress.Clear();
             AgentControl.Reset();
+            TurnState.Begin(ctx.Id);
             List<object> turnSteps = new List<object>();   // このターンのツール実行記録
             StringBuilder turnThink = new StringBuilder(); // このターンの思考(reasoning_content)
 
@@ -1716,6 +1940,7 @@ namespace AgentWeb
 
                             string ndetail = ToolDetail(name, argsJson);
                             AddStep(turnSteps, "ツール実行: " + (name.Length > 0 ? name : "?") + (ndetail.Length > 0 ? ("  " + ndetail) : ""));
+                            TurnState.AddStep("ツール実行: " + (name.Length > 0 ? name : "?") + (ndetail.Length > 0 ? ("  " + ndetail) : ""));
                             Console.WriteLine("[agent] tool_call[" + k + "] id=" + id + " name=" + name);
                             Console.WriteLine("[agent]   args=" + (argsJson.Length > 400 ? argsJson.Substring(0, 400) : argsJson));
 
@@ -1744,6 +1969,7 @@ namespace AgentWeb
             }
             finally
             {
+                TurnState.End();
                 if (save != null) save(ctx);
             }
         }
@@ -2507,6 +2733,7 @@ namespace AgentWeb
             ctx.Messages.Add(Msg("user", userMessage));
             AgentProgress.Clear();
             AgentControl.Reset();
+            TurnState.Begin(ctx.Id);                       // 途中経過をサーバ側に保持(再開用)
             List<object> turnSteps = new List<object>();   // このターンのツール実行記録
             StringBuilder turnThink = new StringBuilder(); // このターンの思考(reasoning_content)
             MaybeCompact(cfg, ctx);
@@ -2528,11 +2755,13 @@ namespace AgentWeb
                     LlmResp resp = CallOnceStream(cfg, eff, cfg.AllowTools,
                         delegate (string d)
                         {
+                            TurnState.AppendContent(d);   // リロードしても途中経過を出せるようにする
                             if (emit != null) emit("content", "{ \"t\" : \"" + JsonEscape(d) + "\" }");
                         },
                         delegate (string d)
                         {
                             turnThink.Append(d);   // リロード後も表示できるよう思考を保存する
+                            TurnState.AppendThink(d);
                             if (emit != null) emit("reasoning", "{ \"t\" : \"" + JsonEscape(d) + "\" }");
                         },
                         toolCallsOut);
@@ -2569,6 +2798,7 @@ namespace AgentWeb
                                 + " args=" + (argsJson.Length > 300 ? argsJson.Substring(0, 300) : argsJson));
                             string tdetail = ToolDetail(name, argsJson);
                             AddStep(turnSteps, "ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
+                            TurnState.AddStep("ツール実行: " + name + (tdetail.Length > 0 ? ("  " + tdetail) : ""));
                             if (emit != null) emit("tool", "{ \"name\" : \"" + JsonEscape(name) + "\", \"detail\" : \"" + JsonEscape(tdetail) + "\" }");
                             string result;
                             try { result = ToolExecutor.Execute(name, argsJson, cfg); }
@@ -2586,7 +2816,7 @@ namespace AgentWeb
                     return;
                 }
             }
-            finally { }
+            finally { TurnState.End(); }   // 終了/中断/例外のいずれでも途中経過を破棄する
             if (emit != null) emit("error", "{ \"message\" : \"tool loop exceeded\" }");
         }
 

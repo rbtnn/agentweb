@@ -86,7 +86,8 @@ build.bat
   "proxyPass": "",
   "systemPrompt": "",
   "bindPath": "",
-  "openBrowserOnStart": true
+  "openBrowserOnStart": true,
+  "theme": "dark"
 }
 ```
 
@@ -110,6 +111,7 @@ build.bat
 | `systemPrompt` | 内蔵日本語プロンプト | AI エージェントの人格／振る舞い |
 | `bindPath` | exe の場所 | 静的ファイル公開ディレクトリ |
 | `openBrowserOnStart` | `true` | 起動時にブラウザで UI を開くか |
+| `theme` | `dark` | 配色（`dark` / `light`）。ブラウザを変えても維持される |
 
 > 互換性：既存の環境変数（`LLM_API_KEY` 等）も引き続き既定値として使えますが、
 > `agentweb.json` が優先されます。
@@ -217,6 +219,8 @@ python3 test_e2e.py --keep   # 一時ディレクトリを残して調査する
 | メタデータ漏れ | `think` / `steps` / `ts` が LLM API へ送られていないか |
 | 複数モデル | モデルごとの URL / API キー / コンテキスト上限が実際の呼び出しに使われるか |
 | モデル切り替え | `POST /api/model` で切り替わり、共通設定が汚れないか |
+| 再開 | 下書き・最後のセッション・配色が保存され、再起動後も復元できるか |
+| 生成途中 | 接続を切っても途中の本文/思考が残り、完了後に `turn` が空になるか |
 | クラッシュ | 応答途中でプロセスが落ちないか（`StackOverflow` の再発検出） |
 - `build.bat` は **Python が使える場合のみ自動で実行**し、不整合があるとビルドを中止します。
   - `py -3` → `python` の順に検出し、実際に起動できるか（`-c "import sys"`）まで確認します。
@@ -229,12 +233,17 @@ python3 test_e2e.py --keep   # 一時ディレクトリを残して調査する
 |---|---|
 | `GET /` | 対話 UI（`index.html`）を返す |
 | `GET /static/<file>` | 静的ファイル |
-| `GET /api/health` | 接続状態・モデル名・キー設定・ツール可否・プロキシを JSON で返す |
+| `GET /api/health` | 状態を JSON で返す（`busy` / `model` / `models` / `progress` / **`lastSession`** / **`draft`** / **`turn`**） |
 | `GET /api/tools` | 利用可能なツール定義（JSON Schema）を返す |
 | `GET /api/diag/tools` | モデルが function calling に対応しているかを確認（ツールは実行しない） |
 | `POST /api/tools` | `{allow:true|false}` でツール on/off を切り替え |
 | `POST /api/cancel` | 処理中の応答を停止 |
 | `POST /api/chat` | body: `{"message":"テキスト","session":"ID"}` → `{"ok":true,"reply":"..."}` |
+| `POST /api/model` | `{"model":"名前"}` で使用モデルを切り替え（生成中は 409 / 不明な名前は 404） |
+| `POST /api/ui` | `{"draft":"...","session":"ID"}` を保存（再開用。応答は `draft` / `lastSession`） |
+| `GET /api/config` / `POST /api/config` | 設定の取得・保存（`theme` を含む） |
+
+> `GET /api/sessions/<id>` は、そのセッションが生成中なら **`turn`**（`content` / `think` / `steps`）も返します。
 
 ## ツール実行（Function Calling）
 
@@ -300,8 +309,9 @@ curl http://localhost:8000/api/diag/tools
 - 保存は `POST /api/config`、取得は `GET /api/config`
 - 表示は localhost のみですが、API キーも画面に表示されます（`type="password"`）
 - `allowTools`（ツール実行の可否）もここで切り替えます（メイン画面にはバッジがありません）
-- **Colorscheme**（`dark` / `light`）もここで切り替えます。テーマはブラウザ側の設定なので
-  `agentweb.json` には保存せず `localStorage` に保持し、選択した時点で即時反映されます
+- **Colorscheme**（`dark` / `light`）もここで切り替えます。選択した時点で即時反映され、
+  **`agentweb.json` の `theme` に保存**されます（ブラウザを変えても維持されます）。
+  `localStorage` は起動時のちらつき防止キャッシュとしてのみ使います
 
 ### セッション欄（画面下部・左寄せ）
 
@@ -352,6 +362,41 @@ curl http://localhost:8000/api/diag/tools
 
 - サーバが返すエラー: SSE の `error` イベント → `⚠ <メッセージ>`
 - 通信自体の失敗: `⚠ 通信エラー: <内容>`
+
+## 途中から再開する（リロード / ブラウザ再起動に耐える）
+
+**状態はすべてサーバ側に保存**しているため、ブラウザを閉じたりリロードしたりしても、
+もう一度開けば**その続きから**始められます。`localStorage` が消えても復元できます
+（単一利用者・単一タブ前提のため、排他制御はしていません）。
+
+| 保存されるもの | 保存先 | 復元のタイミング |
+|---|---|---|
+| 会話履歴（`messages`） | `%APPDATA%\agentweb\sessions\<id>.json` | セッションを開いたとき |
+| ツール実行の記録（`steps`） | 同上 | 同上 |
+| 思考（`think`） | 同上 | 同上 |
+| **最後に開いていたセッション** | `sessions\_state.json` の `lastSession` | 起動時（`/api/health`） |
+| **入力途中のテキスト（下書き）** | `sessions\_state.json` の `draft` | 起動時（`/api/health`） |
+| 配色（`theme`） | `agentweb.json` | 起動時（`/api/config`） |
+| **生成中の途中経過** | サーバのメモリ（`TurnState`） | 起動時・ポーリング時 |
+
+### 生成途中でリロードした場合
+
+生成中は**本文・思考・ツール実行をサーバ側に逐次保持**しています（`TurnState`）。
+リロードすると `/api/health` の `busy` と `/api/sessions/<id>` の `turn` から
+**生成途中の内容がそのまま表示**され、停止ボタンも復元されます。
+そのまま生成が続けば、ポーリングで表示が追従します。
+
+- ユーザー発言とそれまでのツール結果は、**LLM を呼ぶ前に**保存済みです
+- ターンが完了すると `turn` は空になり、確定内容が `messages` に保存されます
+
+### 再開先の決め方（起動時）
+
+1. サーバに記録された `lastSession`（ブラウザを閉じても残る）
+2. ブラウザの `localStorage`
+3. セッション一覧の先頭
+
+下書きは入力のたびに（600ms デバウンスで）`POST /api/ui` によりサーバへ保存され、
+送信すると空になります。
 
 ## セッション管理（Windows AppData に永続化）
 
