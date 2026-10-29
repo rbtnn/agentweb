@@ -489,7 +489,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .models-editor { display: flex; flex-direction: column; gap: 8px; }
   .model-row {
     display: grid;
-    grid-template-columns: 1.2fr 1.6fr 1.2fr 80px 28px;
+    grid-template-columns: 1fr 28px;   /* モデル名 + 削除ボタンだけ */
     gap: 6px;
     align-items: center;
   }
@@ -530,14 +530,13 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .model-add:hover { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
   .model-head {
     display: grid;
-    grid-template-columns: 1.2fr 1.6fr 1.2fr 80px 28px;
+    grid-template-columns: 1fr 28px;
     gap: 6px;
     font-size: 11px;
     color: var(--text-dim);
   }
   @media (max-width: 720px) {
     .model-head { display: none; }
-    .model-row { grid-template-columns: 1fr 28px; }
   }
   .field.bool { flex-direction: row; align-items: center; gap: 8px; }
   .field.bool input { width: 15px; height: 15px; accent-color: var(--accent); }
@@ -1593,7 +1592,7 @@ var settingsOriginPort = null;
 
   var head = document.createElement("div");
   head.className = "model-head";
-  ["Name", "LLM API URL (空欄なら共通設定)", "API Key (空欄なら共通設定)", "Context", ""].forEach(function(t){
+  ["Model name", ""].forEach(function(t){
     var c = document.createElement("span");
     c.textContent = t;
     head.appendChild(c);
@@ -1610,7 +1609,7 @@ var settingsOriginPort = null;
   addBtn.className = "model-add";
   addBtn.id = "modelAdd";
   addBtn.textContent = "＋ モデルを追加";
-  addBtn.addEventListener("click", function(){ addModelRow("", "", "", ""); });
+  addBtn.addEventListener("click", function(){ addModelRow(""); });
   editor.appendChild(addBtn);
 
   mwrap.appendChild(editor);
@@ -1618,26 +1617,19 @@ var settingsOriginPort = null;
 })();
 
 // モデル一覧エディタの 1 行を追加する
-function addModelRow(name, url, key, ctx){
+function addModelRow(name){
   var rows = document.getElementById("modelRows");
   if (!rows) return;
 
   var row = document.createElement("div");
   row.className = "model-row";
 
-  function mkInput(ph, val, cls){
-    var i = document.createElement("input");
-    i.type = "text";
-    i.placeholder = ph;
-    i.value = (val == null) ? "" : String(val);
-    if (cls) i.className = cls;
-    row.appendChild(i);
-    return i;
-  }
-  var n = mkInput("例: gpt-4o", name, "m-name");
-  var u = mkInput("https://.../v1/chat/completions", url, "m-url");
-  var k = mkInput("sk-...", key, "m-key");
-  var c = mkInput("例: 128000", ctx, "m-ctx");
+  var n = document.createElement("input");
+  n.type = "text";
+  n.className = "m-name";
+  n.placeholder = "例: gpt-4o";
+  n.value = (name == null) ? "" : String(name);
+  row.appendChild(n);
 
   var del = document.createElement("button");
   del.type = "button";
@@ -1681,20 +1673,17 @@ function syncModelSelectOptions(){
   if (!sel.value && sel.options.length > 0) sel.value = sel.options[0].value;
 }
 
-// エディタの内容を [{name,llmApiUrl,llmApiKey,contextWindow}] として取り出す
+// エディタの内容をモデル名の配列として取り出す
+// (接続先・APIキー・コンテキスト上限は全モデル共通なので、ここでは持たない)
 function collectModels(){
   var rows = document.getElementById("modelRows");
   var out = [];
   if (!rows) return out;
   Array.prototype.forEach.call(rows.querySelectorAll(".model-row"), function(r){
     var name = (r.querySelector(".m-name").value || "").trim();
-    if (!name) return;   // 名前が空の行は無視
-    out.push({
-      name: name,
-      llmApiUrl: (r.querySelector(".m-url").value || "").trim(),
-      llmApiKey: (r.querySelector(".m-key").value || "").trim(),
-      contextWindow: parseInt(r.querySelector(".m-ctx").value, 10) || 0
-    });
+    if (!name) return;               // 名前が空の行は無視
+    if (out.indexOf(name) >= 0) return;  // 重複は除く
+    out.push(name);
   });
   return out;
 }
@@ -1712,10 +1701,9 @@ function openSettings(){
       if (rows) {
         rows.innerHTML = "";
         (c.models || []).forEach(function(m){
-          addModelRow(m.name || "", m.llmApiUrl || "", m.llmApiKey || "",
-                      (m.contextWindow ? m.contextWindow : ""));
+          addModelRow(modelNameOf(m));
         });
-        if (!(c.models || []).length) addModelRow("", "", "", "");
+        if (!(c.models || []).length) addModelRow("");
         syncModelSelectOptions();
       }
 
@@ -1742,6 +1730,14 @@ function closeSettings(){ settingsModal.style.display = "none"; }
 /* ---------- モデル選択（画面下部・セッション欄の左） ---------- */
 
 // 設定に登録されたモデル一覧をセレクトへ反映する
+// モデル一覧の要素からモデル名を取り出す。
+// 現在は文字列の配列だが、旧形式({"name": ...})も受け付ける。
+function modelNameOf(m){
+  if (m == null) return "";
+  if (typeof m === "string") return m;
+  return m.name || "";
+}
+
 function renderModels(models, selected){
   if (!modelSelect) return;
   modelItems = models || [];
@@ -1749,14 +1745,16 @@ function renderModels(models, selected){
 
   modelSelect.innerHTML = "";
   modelItems.forEach(function(m){
+    var name = modelNameOf(m);
+    if (!name) return;
     var o = document.createElement("option");
-    o.value = m.name || "";
-    o.textContent = m.name || "(名前なし)";
+    o.value = name;
+    o.textContent = name;
     modelSelect.appendChild(o);
   });
 
   // 選択中のモデルが一覧に無ければ先頭を選ぶ
-  if (!currentModel && modelItems.length > 0) currentModel = modelItems[0].name || "";
+  if (!currentModel && modelItems.length > 0) currentModel = modelNameOf(modelItems[0]);
   if (currentModel) modelSelect.value = currentModel;
   modelSelect.disabled = busy || modelItems.length === 0;
 }
@@ -1902,13 +1900,12 @@ function saveSettings(){
     else body[f.k] = el.value;
   });
 
-  // モデル一覧も一緒に保存する
+  // モデル一覧(名前の配列)も一緒に保存する
   var models = collectModels();
   if (models.length > 0) {
     body.models = models;
     // 選択中のモデルが一覧に無ければ先頭に合わせる
-    var names = models.map(function(m){ return m.name; });
-    if (names.indexOf(body.model) < 0) body.model = names[0];
+    if (models.indexOf(body.model) < 0) body.model = models[0];
   }
   var btn = document.getElementById("settingsSave");
   btn.disabled = true;

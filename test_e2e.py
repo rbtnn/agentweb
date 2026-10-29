@@ -446,13 +446,12 @@ def run(keep=False):
         else:
             ok("非ストリーミングでもメタデータは漏れていません")
 
-        # --- ケース 4: 複数モデル（モデルごとの URL / APIキー / コンテキスト上限） ---
+        # --- ケース 4: 複数モデル（名前の一覧だけ。接続先/キー/コンテキストは共通） ---
         _TagHandler.hits = []
         msa, mpa = start_tag_mock("A")
-        msb, mpb = start_tag_mock("B")
         port4 = _free_port()
         cfg4 = os.path.join(tmp, "agentweb4.json")
-        # 共通設定は A を指し、modelB だけ B を指す（キーも別）
+        # 接続先・キー・コンテキスト上限は共通の 1 つだけ。models は名前の配列。
         with open(cfg4, "w", encoding="utf-8") as f:
             json.dump({
                 "port": 0,
@@ -462,12 +461,7 @@ def run(keep=False):
                 "contextWindow": 64000,
                 "allowTools": False,
                 "emitReasoning": False,
-                "models": [
-                    {"name": "modelA", "llmApiUrl": "", "llmApiKey": "", "contextWindow": 0},
-                    {"name": "modelB",
-                     "llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % mpb,
-                     "llmApiKey": "sk-B", "contextWindow": 200000},
-                ],
+                "models": ["modelA", "modelB"],
             }, f, ensure_ascii=False)
         env4 = dict(os.environ)
         for k in ("LLM_API_URL", "LLM_API_KEY", "LLM_MODEL",
@@ -482,54 +476,51 @@ def run(keep=False):
         try:
             _wait_up(base4)
             h = http_json(base4 + "/api/health")
-            if len(h.get("models") or []) == 2 and h.get("model") == "modelA":
-                ok("/api/health が models(2件) と選択中モデルを返します")
+            if h.get("models") == ["modelA", "modelB"] and h.get("model") == "modelA":
+                ok("/api/health がモデル名の一覧と選択中モデルを返します")
             else:
                 fail("models / model が想定と違います: %r" % h)
 
             def ask():
                 return http_json(base4 + "/api/chat", {"message": "hi", "session": ""})
 
-            r = ask()
-            if _TagHandler.hits and _TagHandler.hits[-1]["tag"] == "A" \
-                    and _TagHandler.hits[-1]["model"] == "modelA" \
-                    and _TagHandler.hits[-1]["auth"] == "Bearer sk-A":
-                ok("modelA は共通設定(URL/キー)で呼ばれます")
-            else:
-                fail("modelA の呼び出しが想定と違います: %r"
-                     % (_TagHandler.hits[-1] if _TagHandler.hits else None))
-
-            # modelB へ切り替え → B のサーバ・B のキー
-            http_json(base4 + "/api/model", {"model": "modelB"})
-            r = ask()
+            ask()
             hit = _TagHandler.hits[-1] if _TagHandler.hits else None
-            if hit and hit["tag"] == "B" and hit["model"] == "modelB" \
-                    and hit["auth"] == "Bearer sk-B":
-                ok("modelB へ切り替えると専用 URL/キーで呼ばれます")
+            if hit and hit["model"] == "modelA" and hit["auth"] == "Bearer sk-A":
+                ok("modelA が共通の接続先/キーで呼ばれます")
+            else:
+                fail("modelA の呼び出しが想定と違います: %r" % hit)
+
+            # 切り替え → 共通の接続先のまま、モデル名だけ変わる
+            r = http_json(base4 + "/api/model", {"model": "modelB"})
+            if r.get("model") == "modelB":
+                ok("POST /api/model でモデル名を切り替えられます")
+            else:
+                fail("モデル切り替えの応答が想定と違います: %r" % r)
+            ask()
+            hit = _TagHandler.hits[-1] if _TagHandler.hits else None
+            if hit and hit["model"] == "modelB" and hit["auth"] == "Bearer sk-A" \
+                    and hit["tag"] == "A":
+                ok("modelB も同じ接続先/キーで呼ばれます")
             else:
                 fail("modelB の呼び出しが想定と違います: %r" % hit)
 
             c = http_json(base4 + "/api/config")["config"]
-            if c.get("effectiveContextWindow") == 200000:
-                ok("modelB の contextWindow が実効値に反映されます")
+            if c.get("models") == ["modelA", "modelB"] and c.get("model") == "modelB":
+                ok("/api/config がモデル名の一覧と選択中モデルを返します")
             else:
-                fail("modelB の実効 contextWindow が想定と違います: %r"
-                     % c.get("effectiveContextWindow"))
-            if c.get("contextWindow") == 64000 and c.get("llmApiUrl", "").endswith(
-                    ":%d/v1/chat/completions" % mpa):
-                ok("共通設定はモデル切り替えで汚れません")
+                fail("config の models / model が想定と違います: %r"
+                     % {k: c.get(k) for k in ("models", "model")})
+            if c.get("llmApiUrl", "").endswith(":%d/v1/chat/completions" % mpa) \
+                    and c.get("contextWindow") == 64000:
+                ok("モデルを切り替えても共通設定は変わりません")
             else:
-                fail("共通設定が汚れました: %r" % {k: c.get(k) for k in
-                                                  ("contextWindow", "llmApiUrl")})
-
-            # modelA へ戻す → A に戻り、B の値が残らないこと
-            http_json(base4 + "/api/model", {"model": "modelA"})
-            ask()
-            hit = _TagHandler.hits[-1] if _TagHandler.hits else None
-            if hit and hit["tag"] == "A" and hit["auth"] == "Bearer sk-A":
-                ok("modelA へ戻すと共通設定に戻ります")
+                fail("共通設定が変わりました: %r" % {k: c.get(k) for k in
+                                                    ("llmApiUrl", "contextWindow")})
+            if "effectiveApiUrl" not in c and "effectiveContextWindow" not in c:
+                ok("共通化に伴い effective* は返りません")
             else:
-                fail("modelA へ戻したときの呼び出しが想定と違います: %r" % hit)
+                fail("不要な effective* が残っています: %r" % c)
 
             # エラー系
             try:
@@ -541,11 +532,43 @@ def run(keep=False):
                 else:
                     fail("存在しないモデルのステータスが想定と違います: %d" % e.code)
 
-            saved = json.load(open(cfg4, encoding="utf-8"))
-            if len(saved.get("models") or []) == 2:
-                ok("models が設定ファイルに保存されます")
+            # 空文字 / キー欠落
+            for bad in ({"model": ""}, {}):
+                try:
+                    http_json(base4 + "/api/model", bad)
+                    fail("不正な model で 400 になりません: %r" % bad)
+                except urllib.error.HTTPError as e:
+                    if e.code == 400:
+                        ok("不正な model(%r) は 400 になります" % bad)
+                    else:
+                        fail("不正な model のステータスが想定と違います: %d" % e.code)
+
+            # 旧形式({"name":...})も受け付ける
+            http_json(base4 + "/api/config", {"models": [{"name": "x1"}, {"name": "x2"}]})
+            c = http_json(base4 + "/api/config")["config"]
+            if c.get("models") == ["x1", "x2"]:
+                ok("旧形式(models=[{name}])もモデル名として取り込まれます")
             else:
-                fail("models が保存されていません: %r" % saved.get("models"))
+                fail("旧形式の取り込みが想定と違います: %r" % c.get("models"))
+
+            # 保存形式は名前の配列
+            saved = json.load(open(cfg4, encoding="utf-8"))
+            if saved.get("models") == ["x1", "x2"]:
+                ok("models はモデル名の配列で保存されます")
+            else:
+                fail("models の保存形式が想定と違います: %r" % saved.get("models"))
+            if saved.get("model") in ("x1", "x2"):
+                ok("選択中モデルも設定ファイルに保存されます")
+            else:
+                fail("選択中モデルが保存されていません: %r" % saved.get("model"))
+
+            # 空配列では上書きしない
+            http_json(base4 + "/api/config", {"models": []})
+            c = http_json(base4 + "/api/config")["config"]
+            if c.get("models") == ["x1", "x2"]:
+                ok("空の models では上書きされません")
+            else:
+                fail("空の models で上書きされました: %r" % c.get("models"))
 
             if proc4.poll() is None:
                 ok("複数モデルのテストでサーバが落ちませんでした")
@@ -558,9 +581,8 @@ def run(keep=False):
             except subprocess.TimeoutExpired:
                 proc4.kill()
             log4.close()
-            for m in (msa, msb):
-                m.shutdown()
-                m.server_close()
+            msa.shutdown()
+            msa.server_close()
 
         # --- ケース 5: 再開（下書き・最後のセッション・配色・生成途中の途中経過） ---
         _SlowHandler.hits = []

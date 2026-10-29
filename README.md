@@ -67,12 +67,7 @@ build.bat
   "llmApiUrl": "https://api.openai.com/v1/chat/completions",
   "llmApiKey": "YOUR_API_KEY",
   "model": "gpt-4o-mini",
-  "models": [
-    { "name": "gpt-4o-mini", "llmApiUrl": "", "llmApiKey": "", "contextWindow": 0 },
-    { "name": "gpt-4o",      "llmApiUrl": "", "llmApiKey": "", "contextWindow": 128000 },
-    { "name": "local-llm",   "llmApiUrl": "http://localhost:1234/v1/chat/completions",
-      "llmApiKey": "local", "contextWindow": 32000 }
-  ],
+  "models": ["gpt-4o-mini", "gpt-4o", "local-llm"],
   "allowTools": true,
   "emitReasoning": true,
   "maxToolsPerTurn": 16,
@@ -97,7 +92,7 @@ build.bat
 | `llmApiUrl` | `https://api.openai.com/v1/chat/completions` | チャット API の完全 URL |
 | `llmApiKey` | （空） | 必須。OpenAI 互換 API のキー |
 | `model` | `gpt-4o-mini` | **現在使用中のモデル名**（`models` のいずれか） |
-| `models` | 1 件（`model` と同じ） | **登録するモデルの一覧**（下記） |
+| `models` | 1 件（`model` と同じ） | **選択できるモデル名の一覧**（下記） |
 | `allowTools` | `true` | ツール実行許可 |
 | `emitReasoning` | `true` | モデルの思考(`reasoning_content`/`reasoning`)を UI に表示するか |
 | `maxToolsPerTurn` | `16` | 1 ターンの同時ツール呼び出し上限 |
@@ -118,23 +113,27 @@ build.bat
 
 ### 複数モデルの設定（`models`）
 
-`models` に複数のモデルを登録し、そのうち **1 つを選んで使えます**。
+`models` は**モデル名の配列**です。そのうち **1 つを選んで使えます**。
 選択中のモデルは `model` に名前で保持されます。
 
-| キー | 説明 |
-|---|---|
-| `name` | モデル名（**必須**。空の項目は無視されます） |
-| `llmApiUrl` | そのモデル専用の API URL。**空欄なら共通の `llmApiUrl` を使用** |
-| `llmApiKey` | そのモデル専用の API キー。**空欄なら共通の `llmApiKey` を使用** |
-| `contextWindow` | そのモデルのコンテキスト上限。**`0` なら共通の `contextWindow` を使用** |
+```json
+{
+  "llmApiUrl": "https://api.openai.com/v1/chat/completions",
+  "llmApiKey": "YOUR_API_KEY",
+  "contextWindow": 64000,
+  "model": "gpt-4o-mini",
+  "models": ["gpt-4o-mini", "gpt-4o", "local-llm"]
+}
+```
 
-- モデルごとに **接続先・API キー・コンテキスト上限**を変えられます
-  （例：OpenAI と社内 LLM サーバを併用）。
-- 空欄の項目は共通設定が使われるため、**共通設定が既定値**になります。
+- **接続先（`llmApiUrl`）・API キー（`llmApiKey`）・コンテキスト上限（`contextWindow`）は
+  全モデル共通の 1 つ**です。モデルを切り替えても、これらは変わりません。
+- 切り替わるのは LLM へ送る `model` の値だけです。
 - `models` が空・未指定の場合は、従来どおり `model` 1 件だけで動作します。
+- 名前が空の項目は無視され、重複は 1 つにまとめられます。
 - 選択中のモデルが `models` に無い場合は、一覧の先頭が使われます。
-- モデルを切り替えると、前のモデルの URL／キー／上限は**残りません**
-  （毎回「共通設定＋選択モデルの上書き」で組み立て直します）。
+- 旧形式（`"models": [{"name": "gpt-4o"}, ...]`）も**モデル名として読み込めます**。
+  保存すると新しい形式（名前の配列）に変わります。
 
 #### 切り替え方法
 
@@ -145,6 +144,7 @@ build.bat
 | **API** | `POST /api/model` に `{"model":"gpt-4o"}` を送る（生成中は 409 を返す） |
 
 `⚙ settings` には **Models エディタ**があり、行の追加（＋）・削除（×）・編集ができます。
+**1 行 = モデル名だけ**を入力します（接続先・キー・コンテキストは共通設定側で指定）。
 名前を空にした行は保存されません。
 
 ## 実行（コンソール）
@@ -217,8 +217,9 @@ python3 test_e2e.py --keep   # 一時ディレクトリを残して調査する
 | セッション保存 | `think` / `steps` / `content` が保存され、復元できるか |
 | 非ストリーミング | `/api/chat` でも `reasoning_content` が保存されるか |
 | メタデータ漏れ | `think` / `steps` / `ts` が LLM API へ送られていないか |
-| 複数モデル | モデルごとの URL / API キー / コンテキスト上限が実際の呼び出しに使われるか |
-| モデル切り替え | `POST /api/model` で切り替わり、共通設定が汚れないか |
+| 複数モデル | モデル名の一覧が読み書きでき、切り替えると `model` だけが変わるか |
+| モデル切り替え | `POST /api/model` で切り替わり、共通の接続先/キーが変わらないか |
+| 旧形式 | `models:[{name}]` を名前として取り込めるか |
 | 再開 | 下書き・最後のセッション・配色が保存され、再起動後も復元できるか |
 | 生成途中 | 接続を切っても途中の本文/思考が残り、完了後に `turn` が空になるか |
 | クラッシュ | 応答途中でプロセスが落ちないか（`StackOverflow` の再発検出） |
