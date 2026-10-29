@@ -224,6 +224,31 @@ python3 test_e2e.py --keep   # 一時ディレクトリを残して調査する
 | 新規作成 | `POST /api/sessions` の新規セッションが `lastSession` と一覧に反映されるか |
 | 生成途中 | 接続を切っても途中の本文/思考が残り、完了後に `turn` が空になるか |
 | クラッシュ | 応答途中でプロセスが落ちないか（`StackOverflow` の再発検出） |
+
+### Mermaid のエラー表示
+
+シンタックスエラーのある図は、**元のソースを `<pre>` で表示**し、
+`⚠ Mermaid 表示に失敗しました` の注記を添えます。
+
+> **注意（mermaid 10 系の仕様）**
+> `mermaid.render(id, src)` を**コンテナ無し**で呼ぶと、構文エラー時に
+> 「Syntax error」の図を一時要素 `#d<id>` として **`<body>` の末尾に残したまま**例外を投げます
+> （成功時のみ最後に削除されるため、失敗時は残骸が残ります）。
+> これが画面下部に出てしまう原因でした。
+>
+> そのため `runMermaid()` は **画面外のホスト要素を第 3 引数として渡し**、
+> 成功・失敗どちらでもホストごと破棄します（`mermaidHost()` / `dropMermaidHost()`）。
+> さらに `sweepMermaidTemp()` で `#d<id>` / `#i<id>` が漏れた場合も掃除し、
+> CSS でも `body > [id^="dmm"]` を非表示にして二重の保険をかけています。
+
+`test_mermaid.js`（jsdom + 実際の mermaid 10.9.8）で、
+正常な図が SVG で描画され、壊れた図は `<pre>` 表示になり、
+`dmm` で始まる要素が残らないことを検証できます（`jsdom` が必要）。
+
+```sh
+curl -sLo /tmp/mm.js https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js
+node test_mermaid.js /tmp/mm.js
+```
 - `build.bat` は **Python が使える場合のみ自動で実行**し、不整合があるとビルドを中止します。
   - `py -3` → `python` の順に検出し、実際に起動できるか（`-c "import sys"`）まで確認します。
   - Python が無い / 実行できない場合（Microsoft Store 版のスタブ等）は**警告を出してスキップ**し、

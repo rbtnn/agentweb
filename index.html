@@ -194,6 +194,10 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .mermaid-loading { font-size: 12px; color: var(--muted); padding: 12px; }
   .mermaid-fallback { font-size: 12px; text-align: left; background: var(--panel-2); padding: 8px; border-radius: 6px; white-space: pre-wrap; }
   .mermaid-note { font-size: 11px; color: var(--danger); margin-top: 4px; }
+  /* mermaid が描画失敗時に残す一時要素(#d<id> / #i<id>)と、
+     画面外に隔離するためのホスト。万一残っても表示されないようにする */
+  .mermaid-host { display: none !important; }
+  body > [id^="dmm"], body > [id^="imm"] { display: none !important; }
   .md table { border-collapse: collapse; margin: 10px 0; font-size: 13px; }
   .md th, .md td { border: 1px solid var(--border); padding: 6px 10px; }
   .md th { background: var(--panel); }
@@ -744,6 +748,29 @@ function loadMermaid(cb){
   };
   document.head.appendChild(s);
 }
+// mermaid.render(id, src) は、シンタックスエラー時に「Syntax error」の図を
+// 描画用の一時要素 #d<id> として DOM に残したまま例外を投げる。
+// (mermaid 10 系の仕様。成功時のみ最後に remove される)
+// そのため、描画先のコンテナを明示的に渡して画面外に隔離し、
+// 終わったら(成功・失敗どちらでも)丸ごと破棄する。
+function mermaidHost(){
+  var host = document.createElement("div");
+  host.className = "mermaid-host";
+  host.style.cssText = "position:absolute;left:-99999px;top:0;width:0;height:0;overflow:hidden;";
+  document.body.appendChild(host);
+  return host;
+}
+function dropMermaidHost(host){
+  if (host && host.parentNode) host.parentNode.removeChild(host);
+}
+// 万一流れ出た一時要素(#d<id> / #i<id>)も掃除する
+function sweepMermaidTemp(id){
+  ["d" + id, "i" + id].forEach(function(t){
+    var n = document.getElementById(t);
+    if (n && n.parentNode) n.parentNode.removeChild(n);
+  });
+}
+
 function runMermaid(){
   var els = document.querySelectorAll(".mermaid[data-b64]:not(.done)");
   if (!els.length) return;
@@ -758,11 +785,26 @@ function runMermaid(){
       var srcText = decodeB64(el.getAttribute("data-b64")||"");
       (function(elm, src){
         var id = "mm" + Math.random().toString(36).slice(2,8);
+        var host = mermaidHost();   // 描画先を画面外に隔離する
+        function cleanup(){ dropMermaidHost(host); sweepMermaidTemp(id); }
         try {
-          var pr = mermaid.render(id, src);
-          if (pr && pr.then) pr.then(function(res){ elm.innerHTML = res.svg; }).catch(function(){ showMermaidError(elm); });
-          else { elm.innerHTML = pr; }
-        } catch(e){ showMermaidError(elm); }
+          var pr = mermaid.render(id, src, host);
+          if (pr && pr.then) {
+            pr.then(function(res){
+              elm.innerHTML = res.svg;
+              cleanup();
+            }).catch(function(){
+              showMermaidError(elm);
+              cleanup();
+            });
+          } else {
+            elm.innerHTML = pr;
+            cleanup();
+          }
+        } catch(e){
+          showMermaidError(elm);
+          cleanup();
+        }
       })(el, srcText);
     });
   });
