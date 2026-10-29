@@ -67,6 +67,12 @@ build.bat
   "llmApiUrl": "https://api.openai.com/v1/chat/completions",
   "llmApiKey": "YOUR_API_KEY",
   "model": "gpt-4o-mini",
+  "models": [
+    { "name": "gpt-4o-mini", "llmApiUrl": "", "llmApiKey": "", "contextWindow": 0 },
+    { "name": "gpt-4o",      "llmApiUrl": "", "llmApiKey": "", "contextWindow": 128000 },
+    { "name": "local-llm",   "llmApiUrl": "http://localhost:1234/v1/chat/completions",
+      "llmApiKey": "local", "contextWindow": 32000 }
+  ],
   "allowTools": true,
   "emitReasoning": true,
   "maxToolsPerTurn": 16,
@@ -89,7 +95,8 @@ build.bat
 | `port` | `8000` | 待ち受けポート |
 | `llmApiUrl` | `https://api.openai.com/v1/chat/completions` | チャット API の完全 URL |
 | `llmApiKey` | （空） | 必須。OpenAI 互換 API のキー |
-| `model` | `gpt-4o-mini` | モデル名 |
+| `model` | `gpt-4o-mini` | **現在使用中のモデル名**（`models` のいずれか） |
+| `models` | 1 件（`model` と同じ） | **登録するモデルの一覧**（下記） |
 | `allowTools` | `true` | ツール実行許可 |
 | `emitReasoning` | `true` | モデルの思考(`reasoning_content`/`reasoning`)を UI に表示するか |
 | `maxToolsPerTurn` | `16` | 1 ターンの同時ツール呼び出し上限 |
@@ -106,6 +113,37 @@ build.bat
 
 > 互換性：既存の環境変数（`LLM_API_KEY` 等）も引き続き既定値として使えますが、
 > `agentweb.json` が優先されます。
+
+### 複数モデルの設定（`models`）
+
+`models` に複数のモデルを登録し、そのうち **1 つを選んで使えます**。
+選択中のモデルは `model` に名前で保持されます。
+
+| キー | 説明 |
+|---|---|
+| `name` | モデル名（**必須**。空の項目は無視されます） |
+| `llmApiUrl` | そのモデル専用の API URL。**空欄なら共通の `llmApiUrl` を使用** |
+| `llmApiKey` | そのモデル専用の API キー。**空欄なら共通の `llmApiKey` を使用** |
+| `contextWindow` | そのモデルのコンテキスト上限。**`0` なら共通の `contextWindow` を使用** |
+
+- モデルごとに **接続先・API キー・コンテキスト上限**を変えられます
+  （例：OpenAI と社内 LLM サーバを併用）。
+- 空欄の項目は共通設定が使われるため、**共通設定が既定値**になります。
+- `models` が空・未指定の場合は、従来どおり `model` 1 件だけで動作します。
+- 選択中のモデルが `models` に無い場合は、一覧の先頭が使われます。
+- モデルを切り替えると、前のモデルの URL／キー／上限は**残りません**
+  （毎回「共通設定＋選択モデルの上書き」で組み立て直します）。
+
+#### 切り替え方法
+
+| 方法 | 操作 |
+|---|---|
+| **メイン画面** | 画面下部の**モデル選択ドロップダウン**で選ぶ（即時反映・設定ファイルにも保存） |
+| **設定画面** | `⚙ settings` の **Model** で選び、**Save** |
+| **API** | `POST /api/model` に `{"model":"gpt-4o"}` を送る（生成中は 409 を返す） |
+
+`⚙ settings` には **Models エディタ**があり、行の追加（＋）・削除（×）・編集ができます。
+名前を空にした行は保存されません。
 
 ## 実行（コンソール）
 
@@ -177,6 +215,8 @@ python3 test_e2e.py --keep   # 一時ディレクトリを残して調査する
 | セッション保存 | `think` / `steps` / `content` が保存され、復元できるか |
 | 非ストリーミング | `/api/chat` でも `reasoning_content` が保存されるか |
 | メタデータ漏れ | `think` / `steps` / `ts` が LLM API へ送られていないか |
+| 複数モデル | モデルごとの URL / API キー / コンテキスト上限が実際の呼び出しに使われるか |
+| モデル切り替え | `POST /api/model` で切り替わり、共通設定が汚れないか |
 | クラッシュ | 応答途中でプロセスが落ちないか（`StackOverflow` の再発検出） |
 - `build.bat` は **Python が使える場合のみ自動で実行**し、不整合があるとビルドを中止します。
   - `py -3` → `python` の順に検出し、実際に起動できるか（`-c "import sys"`）まで確認します。
@@ -271,7 +311,7 @@ curl http://localhost:8000/api/diag/tools
 
 ```
 [ 入力欄（テキストエリア）                                ] [ 送信 ]
-[ セッション ▼ ] [ ⟳ ] [ ✎ ] [ × ] [ ＋ ]                 [ ⚙ settings ]
+[ モデル ▼ ] [ セッション ▼ ] [ ⟳ ] [ ✎ ] [ × ] [ ＋ ]     [ ⚙ settings ]
 ```
 
 **同じ行の要素は高さが揃っています**（`index.html` の CSS 変数で管理）。
@@ -279,13 +319,14 @@ curl http://localhost:8000/api/diag/tools
 | 行 | 揃える対象 | 変数 |
 |---|---|---|
 | 1行目 | 入力欄（テキストエリア）と送信ボタン | `--input-h: 52px` |
-| 2行目 | セッションのドロップダウン・⟳/✎/×/＋・`⚙ settings` | `--bar-h: 30px` |
+| 2行目 | モデル選択・セッションのドロップダウン・⟳/✎/×/＋・`⚙ settings` | `--bar-h: 30px` |
 
 `box-sizing: border-box` なので、境界線を含めた高さが完全に一致します。
 入力欄は複数行になると伸びますが、送信ボタンは下端で揃います（`align-items: flex-end`）。
 
 | 操作 | 内容 |
 |---|---|
+| **モデル ▼**（左端） | 使用するモデルを切り替え（`POST /api/model`。実行中は切り替えません） |
 | ドロップダウンで選択 | そのセッションへ切り替え（実行中は切り替えません） |
 | **⟳**（自動設定） | 選択中セッションの名前を会話内容から自動生成（`POST /api/sessions/<id>/autotitle`） |
 | **✎**（名前変更） | ドロップダウンが入力欄に変わり、その場で名前を編集（Enter で確定 / Esc でキャンセル） |
@@ -297,11 +338,12 @@ curl http://localhost:8000/api/diag/tools
 - 表示中の会話以外を削除した場合は**会話を再読み込みしません**（ツール実行の表示が消えないようにするため）。
 - 画面幅が狭い場合（980px 以下）はセッション欄が横いっぱいに広がります。
 - **思考中（応答待ち・生成中）は、停止ボタン以外はすべて無効**になります。
-  ドロップダウン・⟳・✎・×・＋・`⚙ settings` は操作できず（半透明表示）、
+  モデル選択・セッションのドロップダウン・⟳・✎・×・＋・`⚙ settings` は操作できず（半透明表示）、
   設定モーダルも開きません。応答が終わると自動で元に戻ります。
 
-> メイン画面には **model バッジ・tools バッジ・colorscheme ボタン・サイドバー・接続ステータス表示はありません**。
-> model と tools（`allowTools`）は `⚙ settings`、colorscheme も `⚙ settings` の **Colorscheme** で設定します。
+> メイン画面には **tools バッジ・colorscheme ボタン・サイドバー・接続ステータス表示はありません**。
+> モデルの**選択**は画面下部のドロップダウン、モデルの**登録・編集**と tools（`allowTools`）は `⚙ settings`、
+> colorscheme も `⚙ settings` の **Colorscheme** で設定します。
 
 ### エラー表示
 

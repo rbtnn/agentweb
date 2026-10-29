@@ -126,6 +126,42 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+class _TagHandler(http.server.BaseHTTPRequestHandler):
+    """複数モデルのテスト用。どのサーバが呼ばれたか(tag)を記録する。"""
+    protocol_version = "HTTP/1.1"
+    tag = "A"
+    hits = []
+    lock = threading.Lock()
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n).decode("utf-8", "replace")
+        try:
+            req = json.loads(body or "{}")
+        except ValueError:
+            req = {}
+        with _TagHandler.lock:
+            _TagHandler.hits.append({
+                "tag": self.tag,
+                "model": req.get("model"),
+                "auth": self.headers.get("Authorization"),
+            })
+        out = {"id": "c", "object": "chat.completion", "model": req.get("model"),
+               "choices": [{"index": 0, "message": {"role": "assistant",
+                           "content": "from " + self.tag}, "finish_reason": "stop"}],
+               "usage": {"total_tokens": 5}}
+        b = json.dumps(out, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+        self.wfile.flush()
+
+
 class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -151,6 +187,15 @@ def start_mock(plain=False):
 # --------------------------------------------------------------------------
 #  ヘルパ
 # --------------------------------------------------------------------------
+
+def start_tag_mock(tag):
+    """tag ごとに独立したモックサーバを立てる。"""
+    cls = type("TagHandler_" + tag, (_TagHandler,), {"tag": tag})
+    srv = _Server(("127.0.0.1", 0), cls)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, port
+
 
 def find_compiler():
     for name in ("csc", "mcs"):
@@ -359,6 +404,123 @@ def run(keep=False):
             fail("非ストリーミングで think/steps/ts が漏れました: %r" % _Handler.leaks[:3])
         else:
             ok("非ストリーミングでもメタデータは漏れていません")
+
+        # --- ケース 4: 複数モデル（モデルごとの URL / APIキー / コンテキスト上限） ---
+        _TagHandler.hits = []
+        msa, mpa = start_tag_mock("A")
+        msb, mpb = start_tag_mock("B")
+        port4 = _free_port()
+        cfg4 = os.path.join(tmp, "agentweb4.json")
+        # 共通設定は A を指し、modelB だけ B を指す（キーも別）
+        with open(cfg4, "w", encoding="utf-8") as f:
+            json.dump({
+                "port": 0,
+                "llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % mpa,
+                "llmApiKey": "sk-A",
+                "model": "modelA",
+                "contextWindow": 64000,
+                "allowTools": False,
+                "emitReasoning": False,
+                "models": [
+                    {"name": "modelA", "llmApiUrl": "", "llmApiKey": "", "contextWindow": 0},
+                    {"name": "modelB",
+                     "llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % mpb,
+                     "llmApiKey": "sk-B", "contextWindow": 200000},
+                ],
+            }, f, ensure_ascii=False)
+        env4 = dict(os.environ)
+        for k in ("LLM_API_URL", "LLM_API_KEY", "LLM_MODEL",
+                  "ALLOW_TOOLS", "LLM_EMIT_REASONING"):
+            env4.pop(k, None)
+        env4["LLM_USE_SYSTEM_PROXY"] = "0"
+        log4 = open(os.path.join(tmp, "server4.log"), "wb")
+        proc4 = subprocess.Popen(["mono", exe, "--config", cfg4, "--port", str(port4)],
+                                 env=env4, stdout=log4, stderr=subprocess.STDOUT,
+                                 cwd=tmp)
+        base4 = "http://127.0.0.1:%d" % port4
+        try:
+            _wait_up(base4)
+            h = http_json(base4 + "/api/health")
+            if len(h.get("models") or []) == 2 and h.get("model") == "modelA":
+                ok("/api/health が models(2件) と選択中モデルを返します")
+            else:
+                fail("models / model が想定と違います: %r" % h)
+
+            def ask():
+                return http_json(base4 + "/api/chat", {"message": "hi", "session": ""})
+
+            r = ask()
+            if _TagHandler.hits and _TagHandler.hits[-1]["tag"] == "A" \
+                    and _TagHandler.hits[-1]["model"] == "modelA" \
+                    and _TagHandler.hits[-1]["auth"] == "Bearer sk-A":
+                ok("modelA は共通設定(URL/キー)で呼ばれます")
+            else:
+                fail("modelA の呼び出しが想定と違います: %r"
+                     % (_TagHandler.hits[-1] if _TagHandler.hits else None))
+
+            # modelB へ切り替え → B のサーバ・B のキー
+            http_json(base4 + "/api/model", {"model": "modelB"})
+            r = ask()
+            hit = _TagHandler.hits[-1] if _TagHandler.hits else None
+            if hit and hit["tag"] == "B" and hit["model"] == "modelB" \
+                    and hit["auth"] == "Bearer sk-B":
+                ok("modelB へ切り替えると専用 URL/キーで呼ばれます")
+            else:
+                fail("modelB の呼び出しが想定と違います: %r" % hit)
+
+            c = http_json(base4 + "/api/config")["config"]
+            if c.get("effectiveContextWindow") == 200000:
+                ok("modelB の contextWindow が実効値に反映されます")
+            else:
+                fail("modelB の実効 contextWindow が想定と違います: %r"
+                     % c.get("effectiveContextWindow"))
+            if c.get("contextWindow") == 64000 and c.get("llmApiUrl", "").endswith(
+                    ":%d/v1/chat/completions" % mpa):
+                ok("共通設定はモデル切り替えで汚れません")
+            else:
+                fail("共通設定が汚れました: %r" % {k: c.get(k) for k in
+                                                  ("contextWindow", "llmApiUrl")})
+
+            # modelA へ戻す → A に戻り、B の値が残らないこと
+            http_json(base4 + "/api/model", {"model": "modelA"})
+            ask()
+            hit = _TagHandler.hits[-1] if _TagHandler.hits else None
+            if hit and hit["tag"] == "A" and hit["auth"] == "Bearer sk-A":
+                ok("modelA へ戻すと共通設定に戻ります")
+            else:
+                fail("modelA へ戻したときの呼び出しが想定と違います: %r" % hit)
+
+            # エラー系
+            try:
+                http_json(base4 + "/api/model", {"model": "nope"})
+                fail("存在しないモデルで 404 になりません")
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    ok("存在しないモデルは 404 になります")
+                else:
+                    fail("存在しないモデルのステータスが想定と違います: %d" % e.code)
+
+            saved = json.load(open(cfg4, encoding="utf-8"))
+            if len(saved.get("models") or []) == 2:
+                ok("models が設定ファイルに保存されます")
+            else:
+                fail("models が保存されていません: %r" % saved.get("models"))
+
+            if proc4.poll() is None:
+                ok("複数モデルのテストでサーバが落ちませんでした")
+            else:
+                fail("複数モデルのテストでサーバが落ちました")
+        finally:
+            proc4.terminate()
+            try:
+                proc4.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc4.kill()
+            log4.close()
+            for m in (msa, msb):
+                m.shutdown()
+                m.server_close()
+
         return 1 if fails else 0
     finally:
         if keep:

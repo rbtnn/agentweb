@@ -78,7 +78,8 @@ namespace AgentWeb
             Console.WriteLine("agentweb (console)");
             Console.WriteLine("  Listen : http://localhost:" + port + "/");
             Console.WriteLine("  API URL: " + cfg.ApiBaseUrl);
-            Console.WriteLine("  Model  : " + cfg.Model);
+            Console.WriteLine("  Model  : " + cfg.Model
+                + (cfg.Models.Count > 1 ? ("  (登録 " + cfg.Models.Count + " 件)") : ""));
             Console.WriteLine("  Config : " + cfg.ConfigPath);
             Console.WriteLine("  Stop   : Ctrl+C");
 
@@ -112,7 +113,16 @@ namespace AgentWeb
         public string ProxyUser;           // プロキシ認証ユーザー(任意)
         public string ProxyPass;           // プロキシ認証パスワード(任意)
         public bool UseSystemProxy;        // システムプロキシを使うか
-        public string Model;               // モデル名
+        // 共通(ベース)設定。選択中モデルが空欄の項目はここが使われる。
+        // ApiBaseUrl / SecretKey / ContextWindow は「実効値」で、これらにモデル固有値を上書きした結果。
+        public string BaseApiBaseUrl;
+        public string BaseSecretKey;
+        public int BaseContextWindow;
+
+        public string Model;               // 選択中のモデル名
+        // 複数モデルの定義 (名前 → API URL / API キー / コンテキスト上限)
+        // Model で選んだ 1 つが ApiBaseUrl / SecretKey / ContextWindow を上書きする
+        public List<Dictionary<string, object>> Models = new List<Dictionary<string, object>>();
         public bool EmitReasoning;         // reasoning_content を表示するか
         public bool AllowTools;            // LLM によるツール実行を許可するか
         public int MaxToolsPerTurn;        // 1 ターンで同時実行できるツールの最大数
@@ -142,6 +152,12 @@ namespace AgentWeb
             MaxToolsPerTurn = SafeInt(Env("MAX_TOOLS_PER_TURN", "16"), 16);
             ToolTimeoutSec = SafeInt(Env("TOOL_TIMEOUT_SEC", "30"), 30);
             ContextWindow = SafeInt(Env("LLM_CONTEXT_WINDOW", "64000"), 64000);
+            // 既定は 1 件だけ(従来と同じ動作)。設定ファイル / Web UI で増やせる。
+            // ContextWindow 確定後に作る(0 が入らないようにするため)。
+            Models.Add(NewModelEntry(Model, ApiBaseUrl, SecretKey, ContextWindow));
+            BaseApiBaseUrl = ApiBaseUrl;
+            BaseSecretKey = SecretKey;
+            BaseContextWindow = ContextWindow;
             ReserveTokens = SafeInt(Env("LLM_RESERVE_TOKENS", "12000"), 12000);
             KeepRecentTokens = SafeInt(Env("LLM_KEEP_RECENT_TOKENS", "20000"), 20000);
             BindPath = Env("AI_BIND_PATH", AppDir());
@@ -201,13 +217,14 @@ namespace AgentWeb
             if (m == null) return;
 
             if (Has(m, "port")) Port = Json.AsInt(Get(m, "port"));
-            if (Has(m, "llmApiUrl")) ApiBaseUrl = Json.AsString(Get(m, "llmApiUrl"));
-            if (Has(m, "llmApiKey")) SecretKey = Json.AsString(Get(m, "llmApiKey"));
+            if (Has(m, "llmApiUrl")) { BaseApiBaseUrl = Json.AsString(Get(m, "llmApiUrl")); ApiBaseUrl = BaseApiBaseUrl; }
+            if (Has(m, "llmApiKey")) { BaseSecretKey = Json.AsString(Get(m, "llmApiKey")); SecretKey = BaseSecretKey; }
             if (Has(m, "model")) Model = Json.AsString(Get(m, "model"));
+            if (Has(m, "models")) ApplyModels(Get(m, "models"));
             if (Has(m, "allowTools")) AllowTools = AsBool(Get(m, "allowTools"));
             if (Has(m, "maxToolsPerTurn")) MaxToolsPerTurn = Json.AsInt(Get(m, "maxToolsPerTurn"));
             if (Has(m, "toolTimeoutSec")) ToolTimeoutSec = Json.AsInt(Get(m, "toolTimeoutSec"));
-            if (Has(m, "contextWindow")) ContextWindow = Json.AsInt(Get(m, "contextWindow"));
+            if (Has(m, "contextWindow")) { BaseContextWindow = Json.AsInt(Get(m, "contextWindow")); ContextWindow = BaseContextWindow; }
             if (Has(m, "reserveTokens")) ReserveTokens = Json.AsInt(Get(m, "reserveTokens"));
             if (Has(m, "keepRecentTokens")) KeepRecentTokens = Json.AsInt(Get(m, "keepRecentTokens"));
             if (Has(m, "preserveRecentTokens")) KeepRecentTokens = Json.AsInt(Get(m, "preserveRecentTokens"));
@@ -219,6 +236,10 @@ namespace AgentWeb
             if (Has(m, "bindPath")) BindPath = Json.AsString(Get(m, "bindPath"));
             if (Has(m, "openBrowserOnStart")) OpenBrowserOnStart = AsBool(Get(m, "openBrowserOnStart"));
             if (Has(m, "emitReasoning")) EmitReasoning = AsBool(Get(m, "emitReasoning"));
+
+            // 選択中モデルの URL / APIキー / コンテキスト上限を実効値へ反映する
+            // (共通設定より優先。空欄項目は共通設定のまま)
+            ApplySelectedModel();
         }
 
         // 現在の設定を JSON 用の辞書にする(Web UI / 設定ファイル保存で共用)
@@ -226,14 +247,15 @@ namespace AgentWeb
         {
             Dictionary<string, object> m = new Dictionary<string, object>();
             m["port"] = Port;
-            m["llmApiUrl"] = ApiBaseUrl;
-            m["llmApiKey"] = SecretKey;
+            m["llmApiUrl"] = BaseApiBaseUrl;
+            m["llmApiKey"] = BaseSecretKey;
             m["model"] = Model;
+            m["models"] = ModelsToJson();
             m["allowTools"] = AllowTools;
             m["emitReasoning"] = EmitReasoning;
             m["maxToolsPerTurn"] = MaxToolsPerTurn;
             m["toolTimeoutSec"] = ToolTimeoutSec;
-            m["contextWindow"] = ContextWindow;
+            m["contextWindow"] = BaseContextWindow;
             m["reserveTokens"] = ReserveTokens;
             m["keepRecentTokens"] = KeepRecentTokens;
             m["useSystemProxy"] = UseSystemProxy;
@@ -243,6 +265,112 @@ namespace AgentWeb
             m["systemPrompt"] = SystemPrompt;
             m["bindPath"] = BindPath;
             m["openBrowserOnStart"] = OpenBrowserOnStart;
+            return m;
+        }
+
+        // ---------------- 複数モデル ----------------
+
+        // モデル定義を 1 件作る(空文字は空のまま保持する)
+        public static Dictionary<string, object> NewModelEntry(string name, string url, string key, int ctx)
+        {
+            Dictionary<string, object> e = new Dictionary<string, object>();
+            e["name"] = name ?? "";
+            e["llmApiUrl"] = url ?? "";
+            e["llmApiKey"] = key ?? "";
+            e["contextWindow"] = ctx;
+            return e;
+        }
+
+        // 選択中のモデル定義を探す(見つからなければ null)
+        public Dictionary<string, object> SelectedModel()
+        {
+            for (int i = 0; i < Models.Count; i++)
+            {
+                Dictionary<string, object> e = Models[i];
+                if (e == null) continue;
+                if (Json.AsString(Get(e, "name")).Trim() == (Model ?? "").Trim())
+                    return e;
+            }
+            return null;
+        }
+
+        // 選択中のモデルの URL / APIキー / コンテキスト上限を実効値へ反映する。
+        // 空欄の項目は「共通設定(llmApiUrl / llmApiKey / contextWindow)を使う」と解釈する。
+        public void ApplySelectedModel()
+        {
+            // まず共通設定へ戻してから、選択中モデルの値で上書きする
+            // (モデルを切り替えたときに前のモデルの値が残らないようにするため)
+            ApiBaseUrl = BaseApiBaseUrl;
+            SecretKey = BaseSecretKey;
+            ContextWindow = BaseContextWindow;
+
+            Dictionary<string, object> e = SelectedModel();
+            if (e == null) return;
+
+            string url = Json.AsString(Get(e, "llmApiUrl")).Trim();
+            if (url.Length > 0) ApiBaseUrl = url;
+
+            string key = Json.AsString(Get(e, "llmApiKey"));
+            if (key.Trim().Length > 0) SecretKey = key;
+
+            int ctx = Json.AsInt(Get(e, "contextWindow"));
+            if (ctx > 0) ContextWindow = ctx;
+        }
+
+        // 設定ファイル / Web UI から来たモデル一覧を適用する
+        public void ApplyModels(object raw)
+        {
+            List<object> arr = raw as List<object>;
+            if (arr == null) return;
+
+            List<Dictionary<string, object>> list = new List<Dictionary<string, object>>();
+            for (int i = 0; i < arr.Count; i++)
+            {
+                Dictionary<string, object> e = arr[i] as Dictionary<string, object>;
+                if (e == null) continue;
+                string name = Json.AsString(Get(e, "name")).Trim();
+                if (name.Length == 0) continue;      // 名前が無い項目は無視
+                list.Add(NewModelEntry(
+                    name,
+                    Json.AsString(Get(e, "llmApiUrl")),
+                    Json.AsString(Get(e, "llmApiKey")),
+                    Json.AsInt(Get(e, "contextWindow"))));
+            }
+            if (list.Count == 0) return;             // 空で上書きしない
+            Models = list;
+
+            // 選択中のモデルが一覧に無ければ先頭へ寄せる
+            if (SelectedModel() == null) Model = Json.AsString(Get(Models[0], "name"));
+            ApplySelectedModel();
+        }
+
+        // モデル一覧を JSON 用にする
+        public List<object> ModelsToJson()
+        {
+            List<object> arr = new List<object>();
+            for (int i = 0; i < Models.Count; i++)
+            {
+                Dictionary<string, object> e = Models[i];
+                if (e == null) continue;
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["name"] = Json.AsString(Get(e, "name"));
+                d["llmApiUrl"] = Json.AsString(Get(e, "llmApiUrl"));
+                d["llmApiKey"] = Json.AsString(Get(e, "llmApiKey"));
+                d["contextWindow"] = Json.AsInt(Get(e, "contextWindow"));
+                arr.Add(d);
+            }
+            return arr;
+        }
+
+        // Web UI に返す設定辞書。
+        // llmApiUrl / llmApiKey / contextWindow は「共通設定(ベース)」のまま返す
+        // (設定画面で編集して保存しても、モデル固有値が共通設定へ混ざらないようにするため)。
+        // 実際に使われている値は effective* として別に返す。
+        public Dictionary<string, object> ToApiDict()
+        {
+            Dictionary<string, object> m = ToJsonDict();
+            m["effectiveApiUrl"] = ApiBaseUrl;
+            m["effectiveContextWindow"] = ContextWindow;
             return m;
         }
 
@@ -434,6 +562,8 @@ namespace AgentWeb
                 return HandleGetConfig();
             if (req.Method == "POST" && path == "/api/config")
                 return HandleSetConfig(req);
+            if (req.Method == "POST" && path == "/api/model")
+                return HandleSetModel(req);
             if (req.Method == "GET" && path == "/api/tools")
                 return HandleTools();
             if (req.Method == "GET" && path == "/api/diag/tools")
@@ -745,7 +875,7 @@ namespace AgentWeb
         {
             Dictionary<string, object> d = new Dictionary<string, object>();
             d["ok"] = true;
-            d["config"] = config.ToJsonDict();
+            d["config"] = config.ToApiDict();
             d["path"] = config.ConfigPath;
             return JsonResponse(200, d);
         }
@@ -779,8 +909,60 @@ namespace AgentWeb
             }
             Dictionary<string, object> d = new Dictionary<string, object>();
             d["ok"] = true;
-            d["config"] = config.ToJsonDict();
+            d["config"] = config.ToApiDict();
             d["path"] = config.ConfigPath;
+            return JsonResponse(200, d);
+        }
+
+        // 使用するモデルを切り替える (Web UI のセレクトから呼ぶ)。
+        // 選択は設定ファイルにも保存され、以降のリクエストに即時反映される。
+        HttpResponse HandleSetModel(HttpRequest req)
+        {
+            string name = "";
+            if (req.Body != null && req.Body.Length > 0)
+            {
+                try
+                {
+                    object o = Json.Parse(Encoding.UTF8.GetString(req.Body));
+                    Dictionary<string, object> m = o as Dictionary<string, object>;
+                    if (m != null && m.ContainsKey("model")) name = Json.AsString(m["model"]).Trim();
+                }
+                catch (Exception ex)
+                {
+                    return JsonResponse(400, MakeError("bad_request", "リクエストの解析に失敗しました: " + ex.Message));
+                }
+            }
+
+            if (name.Length == 0)
+                return JsonResponse(400, MakeError("bad_request", "model が指定されていません"));
+
+            // 実行中(生成中)はモデルを切り替えない
+            if (busy)
+                return JsonResponse(409, MakeError("busy", "生成中はモデルを切り替えられません"));
+
+            bool found = false;
+            for (int i = 0; i < config.Models.Count; i++)
+            {
+                Dictionary<string, object> e = config.Models[i];
+                if (e == null) continue;
+                string en = e.ContainsKey("name") ? Json.AsString(e["name"]).Trim() : "";
+                if (en == name) { found = true; break; }
+            }
+            if (!found)
+                return JsonResponse(404, MakeError("not_found", "そのモデルは設定にありません: " + name));
+
+            config.Model = name;
+            config.ApplySelectedModel();
+            try { config.Save(); }
+            catch (Exception ex)
+            {
+                return JsonResponse(500, MakeError("save_failed", "設定の保存に失敗しました: " + ex.Message));
+            }
+
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["ok"] = true;
+            d["model"] = config.Model;
+            d["config"] = config.ToApiDict();
             return JsonResponse(200, d);
         }
 
@@ -790,6 +972,7 @@ namespace AgentWeb
             d["ok"] = true;
             d["server"] = "agentweb (csc.exe / C#5)";
             d["model"] = config.Model;
+            d["models"] = config.ModelsToJson();
             d["apiKey"] = (config.SecretKey.Length > 0) ? "set" : "not-set";
             d["apiBaseUrl"] = config.ApiBaseUrl;
             d["allowTools"] = config.AllowTools;

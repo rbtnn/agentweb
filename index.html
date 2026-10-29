@@ -288,6 +288,15 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
   .theme-link:disabled { opacity: .45; cursor: default; }
   .theme-link:disabled:hover { background: var(--bg); color: var(--muted); }
 
+  /* ---------- モデル選択（セッション欄の左） ---------- */
+  .model-select {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 240px;
+    height: var(--bar-h);
+    font-size: 11px;
+  }
+
   /* ---------- セッション欄（左寄せ） ---------- */
   .sess-panel {
     display: flex;
@@ -476,6 +485,60 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
     font-size: 12.5px;
     line-height: 1.5;
   }
+  /* モデル一覧のエディタ */
+  .models-editor { display: flex; flex-direction: column; gap: 8px; }
+  .model-row {
+    display: grid;
+    grid-template-columns: 1.2fr 1.6fr 1.2fr 80px 28px;
+    gap: 6px;
+    align-items: center;
+  }
+  .model-row input {
+    width: 100%;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    padding: 6px 8px;
+    outline: none;
+    min-width: 0;
+  }
+  .model-row input:focus { border-color: var(--accent); }
+  .model-row .m-del {
+    width: 24px; height: 24px;
+    border: none; border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit; font-size: 14px; line-height: 1;
+    cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .model-row .m-del:hover { background: var(--panel-2); color: var(--danger); }
+  .model-row .m-del:disabled { opacity: .35; cursor: default; background: transparent; color: var(--muted); }
+  .model-add {
+    align-self: flex-start;
+    cursor: pointer;
+    font: inherit; font-size: 12px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    padding: 5px 10px;
+  }
+  .model-add:hover { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+  .model-head {
+    display: grid;
+    grid-template-columns: 1.2fr 1.6fr 1.2fr 80px 28px;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  @media (max-width: 720px) {
+    .model-head { display: none; }
+    .model-row { grid-template-columns: 1fr 28px; }
+  }
   .field.bool { flex-direction: row; align-items: center; gap: 8px; }
   .field.bool input { width: 15px; height: 15px; accent-color: var(--accent); }
   .modal-foot {
@@ -555,6 +618,7 @@ try{var __t=localStorage.getItem("aiagent.theme")||"dark";document.documentEleme
       </button>
     </div>
     <div class="composer-bar">
+      <select class="sess-select model-select" id="modelSelect" title="使用するモデルを選択" aria-label="モデル一覧"></select>
       <div class="sess-panel">
         <select class="sess-select" id="settingsSessionList" title="セッションを選択" aria-label="セッション一覧"></select>
         <div class="sess-actions">
@@ -716,6 +780,9 @@ var sessRenameBtn = document.getElementById("settingsRename");
 var sessDeleteBtn = document.getElementById("settingsDelete");
 var sessNewBtn    = document.getElementById("settingsNew");
 var settingsBtn   = document.getElementById("settingsBtn");
+var modelSelect   = document.getElementById("modelSelect");
+var modelItems = [];     // 設定に登録されているモデル [{name,llmApiUrl,llmApiKey,contextWindow}]
+var currentModel = "";   // 現在選択中のモデル名
 var sessItems = [];      // 表示中のセッション [{id,title,count}]
 var sessSelId = "";      // ドロップダウンで選択中の ID
 var allowTools = true;   // 設定モーダルでのみ変更する
@@ -1118,6 +1185,7 @@ function initServerState() {
     .then(function(d){
       if (d && d.ok) {
         allowTools = !(d.allowTools === false);
+        renderModels(d.models || [], d.model || "");   // モデル一覧と選択中モデル
         serverBusy = !!(d.busy);
         if (serverBusy) {
           setBusy(true);
@@ -1346,7 +1414,7 @@ function setTheme(t){
 var SETTINGS_FIELDS = [
   { k:"theme",            label:"Colorscheme",          type:"select", client:true,
     options:[{v:"dark",t:"dark"},{v:"light",t:"light"}] },
-  { k:"model",            label:"Model",                type:"text" },
+  { k:"model",            label:"Model (使用するモデル)",  type:"select", dynamic:"models" },
   { k:"llmApiUrl",        label:"LLM API URL",          type:"text", full:true },
   { k:"llmApiKey",        label:"API Key",              type:"password", full:true },
   { k:"allowTools",       label:"Allow tools",          type:"bool" },
@@ -1381,12 +1449,22 @@ var settingsOriginPort = null;
       el = document.createElement("textarea");
     } else if (f.type === "select") {
       el = document.createElement("select");
+      // dynamic:"models" の場合はモデル一覧から後で埋める
       (f.options || []).forEach(function(o){
         var op = document.createElement("option");
         op.value = o.v;
         op.textContent = o.t;
         el.appendChild(op);
       });
+      el.style.width = "100%";
+      el.style.background = "var(--bg-panel)";
+      el.style.border = "1px solid var(--border)";
+      el.style.borderRadius = "6px";
+      el.style.color = "var(--text)";
+      el.style.font = "inherit";
+      el.style.fontSize = "13px";
+      el.style.padding = "7px 9px";
+      el.style.outline = "none";
     } else {
       el = document.createElement("input");
       el.type = (f.type === "bool") ? "checkbox" : f.type;
@@ -1415,7 +1493,125 @@ var settingsOriginPort = null;
     settingsBody.appendChild(wrap);
     settingsEls[f.k] = el;
   });
+
+  // ---- モデル一覧のエディタ（全幅） ----
+  var mwrap = document.createElement("div");
+  mwrap.className = "field full";
+  var mlb = document.createElement("label");
+  mlb.textContent = "Models (複数登録して、使用するモデルを選べます)";
+  mwrap.appendChild(mlb);
+
+  var editor = document.createElement("div");
+  editor.className = "models-editor";
+  editor.id = "modelsEditor";
+
+  var head = document.createElement("div");
+  head.className = "model-head";
+  ["Name", "LLM API URL (空欄なら共通設定)", "API Key (空欄なら共通設定)", "Context", ""].forEach(function(t){
+    var c = document.createElement("span");
+    c.textContent = t;
+    head.appendChild(c);
+  });
+  editor.appendChild(head);
+
+  var rows = document.createElement("div");
+  rows.className = "models-editor";
+  rows.id = "modelRows";
+  editor.appendChild(rows);
+
+  var addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "model-add";
+  addBtn.id = "modelAdd";
+  addBtn.textContent = "＋ モデルを追加";
+  addBtn.addEventListener("click", function(){ addModelRow("", "", "", ""); });
+  editor.appendChild(addBtn);
+
+  mwrap.appendChild(editor);
+  settingsBody.appendChild(mwrap);
 })();
+
+// モデル一覧エディタの 1 行を追加する
+function addModelRow(name, url, key, ctx){
+  var rows = document.getElementById("modelRows");
+  if (!rows) return;
+
+  var row = document.createElement("div");
+  row.className = "model-row";
+
+  function mkInput(ph, val, cls){
+    var i = document.createElement("input");
+    i.type = "text";
+    i.placeholder = ph;
+    i.value = (val == null) ? "" : String(val);
+    if (cls) i.className = cls;
+    row.appendChild(i);
+    return i;
+  }
+  var n = mkInput("例: gpt-4o", name, "m-name");
+  var u = mkInput("https://.../v1/chat/completions", url, "m-url");
+  var k = mkInput("sk-...", key, "m-key");
+  var c = mkInput("例: 128000", ctx, "m-ctx");
+
+  var del = document.createElement("button");
+  del.type = "button";
+  del.className = "m-del";
+  del.textContent = "×";
+  del.title = "このモデルを削除";
+  del.addEventListener("click", function(){
+    row.parentNode.removeChild(row);
+    syncModelSelectOptions();
+  });
+  row.appendChild(del);
+
+  rows.appendChild(row);
+  syncModelSelectOptions();
+}
+
+// エディタの内容から Model セレクトの選択肢を作り直す
+function syncModelSelectOptions(){
+  var sel = settingsEls["model"];
+  var rows = document.getElementById("modelRows");
+  if (!sel || !rows) return;
+
+  var keep = sel.value;
+  sel.innerHTML = "";
+  Array.prototype.forEach.call(rows.querySelectorAll(".model-row"), function(r){
+    var name = (r.querySelector(".m-name").value || "").trim();
+    if (!name) return;
+    var o = document.createElement("option");
+    o.value = name;
+    o.textContent = name;
+    sel.appendChild(o);
+  });
+  if (keep) {
+    // 選択肢に残っていれば維持する
+    var found = false;
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === keep) { found = true; break; }
+    }
+    if (found) sel.value = keep;
+  }
+  if (!sel.value && sel.options.length > 0) sel.value = sel.options[0].value;
+}
+
+// エディタの内容を [{name,llmApiUrl,llmApiKey,contextWindow}] として取り出す
+function collectModels(){
+  var rows = document.getElementById("modelRows");
+  var out = [];
+  if (!rows) return out;
+  Array.prototype.forEach.call(rows.querySelectorAll(".model-row"), function(r){
+    var name = (r.querySelector(".m-name").value || "").trim();
+    if (!name) return;   // 名前が空の行は無視
+    out.push({
+      name: name,
+      llmApiUrl: (r.querySelector(".m-url").value || "").trim(),
+      llmApiKey: (r.querySelector(".m-key").value || "").trim(),
+      contextWindow: parseInt(r.querySelector(".m-ctx").value, 10) || 0
+    });
+  });
+  return out;
+}
 
 function openSettings(){
   if (busy) return;   // 思考中は停止ボタン以外を操作できない
@@ -1424,6 +1620,19 @@ function openSettings(){
     .then(function(d){
       if (!d || !d.ok) { alert("設定の取得に失敗しました"); return; }
       var c = d.config || {};
+
+      // モデル一覧エディタを作り直す
+      var rows = document.getElementById("modelRows");
+      if (rows) {
+        rows.innerHTML = "";
+        (c.models || []).forEach(function(m){
+          addModelRow(m.name || "", m.llmApiUrl || "", m.llmApiKey || "",
+                      (m.contextWindow ? m.contextWindow : ""));
+        });
+        if (!(c.models || []).length) addModelRow("", "", "", "");
+        syncModelSelectOptions();
+      }
+
       SETTINGS_FIELDS.forEach(function(f){
         var el = settingsEls[f.k];
         if (f.client) {
@@ -1444,6 +1653,64 @@ function openSettings(){
 
 function closeSettings(){ settingsModal.style.display = "none"; }
 
+/* ---------- モデル選択（画面下部・セッション欄の左） ---------- */
+
+// 設定に登録されたモデル一覧をセレクトへ反映する
+function renderModels(models, selected){
+  if (!modelSelect) return;
+  modelItems = models || [];
+  currentModel = selected || "";
+
+  modelSelect.innerHTML = "";
+  modelItems.forEach(function(m){
+    var o = document.createElement("option");
+    o.value = m.name || "";
+    o.textContent = m.name || "(名前なし)";
+    modelSelect.appendChild(o);
+  });
+
+  // 選択中のモデルが一覧に無ければ先頭を選ぶ
+  if (!currentModel && modelItems.length > 0) currentModel = modelItems[0].name || "";
+  if (currentModel) modelSelect.value = currentModel;
+  modelSelect.disabled = busy || modelItems.length === 0;
+}
+
+// 選択したモデルへ切り替える(サーバ側にも保存される)
+function pickModel(name){
+  if (!name || name === currentModel) return;
+  var prev = currentModel;
+  currentModel = name;
+  modelSelect.disabled = true;
+  fetch("/api/model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: name })
+  })
+    .then(function(r){ return r.json().catch(function(){ return null; }); })
+    .then(function(d){
+      modelSelect.disabled = busy;
+      if (!d || !d.ok) {
+        currentModel = prev;
+        modelSelect.value = prev;
+        alert("モデルの切り替えに失敗しました: " + ((d && (d.message || d.error)) || "不明なエラー"));
+        return;
+      }
+      currentModel = d.model || name;
+      modelSelect.value = currentModel;
+      if (d.config) renderModels(d.config.models || [], currentModel);
+    })
+    .catch(function(){
+      modelSelect.disabled = busy;
+      currentModel = prev;
+      modelSelect.value = prev;
+      alert("モデルの切り替えに失敗しました(通信エラー)");
+    });
+}
+
+modelSelect.addEventListener("change", function(){
+  pickModel(modelSelect.value);
+});
+
 /* ---------- 画面下部 (settings ボタンの右側): セッションのドロップダウンと操作 ---------- */
 
 function updateSessButtons(){
@@ -1461,6 +1728,7 @@ function updateSessButtons(){
   // ドロップダウンと settings ボタンも思考中は無効
   if (sessListBox) sessListBox.disabled = busy;
   if (settingsBtn) settingsBtn.disabled = busy;
+  if (modelSelect) modelSelect.disabled = busy || modelItems.length === 0;
 }
 
 function renderSettingsSessions(sessions, selected){
@@ -1547,6 +1815,15 @@ function saveSettings(){
     else if (f.type === "number") body[f.k] = parseInt(el.value, 10) || 0;
     else body[f.k] = el.value;
   });
+
+  // モデル一覧も一緒に保存する
+  var models = collectModels();
+  if (models.length > 0) {
+    body.models = models;
+    // 選択中のモデルが一覧に無ければ先頭に合わせる
+    var names = models.map(function(m){ return m.name; });
+    if (names.indexOf(body.model) < 0) body.model = names[0];
+  }
   var btn = document.getElementById("settingsSave");
   btn.disabled = true;
   fetch("/api/config", {
@@ -1562,6 +1839,10 @@ function saveSettings(){
       // ツール可否は即時反映される(メイン画面にはバッジが無い)
       if (d.config && typeof d.config.allowTools === "boolean") {
         allowTools = d.config.allowTools;
+      }
+      // メイン画面のモデル選択も保存結果に合わせる
+      if (d.config && d.config.models) {
+        renderModels(d.config.models, d.config.model || "");
       }
       if (settingsOriginPort != null && d.config && d.config.port !== settingsOriginPort) {
         alert("ポート番号を変更しました。反映には agentweb.exe の再起動が必要です。");
