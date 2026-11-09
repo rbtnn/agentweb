@@ -128,8 +128,7 @@ namespace Tau
     {
         public string ApiBaseUrl;          // OpenAI 互換 /chat/completions の URL
         public string SecretKey;           // API キー
-        public string Model;               // 選択中のモデル名
-        public List<string> Models = new List<string>();   // 選択できるモデル名の一覧
+        public string Model;               // 使用するモデル名
 
         public bool AllowTools;            // ツール実行を許可するか
         public bool EmitReasoning;         // 思考(reasoning)を表示するか
@@ -165,8 +164,6 @@ namespace Tau
             ReserveTokens = SafeInt(Env("LLM_RESERVE_TOKENS", "12000"), 12000);
             KeepRecentTokens = SafeInt(Env("LLM_KEEP_RECENT_TOKENS", "20000"), 20000);
 
-            // モデル一覧は既定では 1 件(選択中のモデルだけ)
-            Models.Add(Model);
 
             SystemPrompt = Env("AI_SYSTEM_PROMPT",
                 "あなたはコンソール上で動作する AI エージェントです。"
@@ -245,7 +242,6 @@ namespace Tau
             if (Has(m, "llmApiUrl")) ApiBaseUrl = Json.AsString(Get(m, "llmApiUrl"));
             if (Has(m, "llmApiKey")) SecretKey = Json.AsString(Get(m, "llmApiKey"));
             if (Has(m, "model")) Model = Json.AsString(Get(m, "model"));
-            if (Has(m, "models")) ApplyModels(Get(m, "models"));
             if (Has(m, "allowTools")) AllowTools = AsBool(Get(m, "allowTools"));
             if (Has(m, "emitReasoning")) EmitReasoning = AsBool(Get(m, "emitReasoning"));
             if (Has(m, "maxToolsPerTurn")) MaxToolsPerTurn = Json.AsInt(Get(m, "maxToolsPerTurn"));
@@ -259,31 +255,6 @@ namespace Tau
             if (Has(m, "proxyPass")) ProxyPass = Json.AsString(Get(m, "proxyPass"));
             if (Has(m, "useSystemProxy")) UseSystemProxy = AsBool(Get(m, "useSystemProxy"));
             if (Has(m, "systemPrompt")) SystemPrompt = Json.AsString(Get(m, "systemPrompt"));
-
-            // 選択中のモデルが一覧に無ければ先頭へ寄せる
-            if (Models.Count > 0 && !Models.Contains(Model)) Model = Models[0];
-        }
-
-        // モデル一覧(名前の配列)を適用する。文字列でも {"name": ...} でも受け付ける。
-        void ApplyModels(object raw)
-        {
-            List<object> arr = raw as List<object>;
-            if (arr == null) return;
-
-            List<string> list = new List<string>();
-            for (int i = 0; i < arr.Count; i++)
-            {
-                string name = "";
-                Dictionary<string, object> e = arr[i] as Dictionary<string, object>;
-                if (e != null) name = Json.AsString(Get(e, "name"));
-                else name = Json.AsString(arr[i]);
-                name = name.Trim();
-                if (name.Length == 0) continue;
-                if (!list.Contains(name)) list.Add(name);
-            }
-            if (list.Count == 0) return;
-            Models = list;
-            if (!Models.Contains(Model)) Model = Models[0];
         }
 
         public Dictionary<string, object> ToDict()
@@ -292,7 +263,6 @@ namespace Tau
             m["llmApiUrl"] = ApiBaseUrl;
             m["llmApiKey"] = SecretKey;
             m["model"] = Model;
-            m["models"] = ModelsToJson();
             m["allowTools"] = AllowTools;
             m["emitReasoning"] = EmitReasoning;
             m["maxToolsPerTurn"] = MaxToolsPerTurn;
@@ -308,13 +278,6 @@ namespace Tau
             return m;
         }
 
-        List<object> ModelsToJson()
-        {
-            List<object> arr = new List<object>();
-            for (int i = 0; i < Models.Count; i++) arr.Add(Models[i]);
-            return arr;
-        }
-
         // 設定をファイルへ保存する(/model での切り替えを次回も維持するため)
         //
         // 手で追記した項目などを失わないよう、既存ファイルの内容を読み込んでから
@@ -326,6 +289,7 @@ namespace Tau
                 Dictionary<string, object> m = ToDict();
 
                 // 既存ファイルのうち tau が扱わないキーを引き継ぐ
+                // (手で追記した設定を失わないため)
                 try
                 {
                     if (File.Exists(ConfigPath))
@@ -340,6 +304,9 @@ namespace Tau
                     }
                 }
                 catch { }
+
+                // 廃止したキーは保存時に取り除く(models は tau では使わない)
+                m.Remove("models");
 
                 string dir = Path.GetDirectoryName(ConfigPath);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
@@ -2474,8 +2441,7 @@ namespace Tau
             Bold("tau");
             Muted(" - コンソール AI エージェント");
             Console.WriteLine();
-            Console.WriteLine("  Model  : " + cfg.Model
-                + (cfg.Models.Count > 1 ? ("  (登録 " + cfg.Models.Count + " 件)") : ""));
+            Console.WriteLine("  Model  : " + cfg.Model);
             Console.WriteLine("  Tools  : " + (cfg.AllowTools ? "on" : "off"));
             Console.WriteLine("  Config : " + cfg.ConfigPath);
             if (ctx != null)
@@ -2648,13 +2614,7 @@ namespace Tau
                     if (arg.Length == 0)
                     {
                         Console.WriteLine("  現在のモデル: " + cfg.Model);
-                        Console.WriteLine("  登録: " + string.Join(", ", cfg.Models.ToArray()));
-                        return true;
-                    }
-                    if (!cfg.Models.Contains(arg))
-                    {
-                        ConsoleUi.Danger("登録されていないモデルです: " + arg + "\n");
-                        Console.WriteLine("  登録: " + string.Join(", ", cfg.Models.ToArray()));
+                        ConsoleUi.Dim("  変更: /model <モデル名>\n");
                         return true;
                     }
                     cfg.Model = arg;
@@ -2849,15 +2809,30 @@ namespace Tau
                     ConsoleUi.Accent("> ");
                     Console.WriteLine(content);
                 }
-                else if (role == "assistant" && content.Trim().Length > 0)
+                else if (role == "assistant")
                 {
+                    // 思考 → ツール実行 → 本文 の順に、それぞれ改行して表示する
                     if (m.ContainsKey("think"))
                     {
-                        ConsoleUi.Think("  [思考] " + Json.AsString(m["think"]) + "\n");
+                        string think = Json.AsString(m["think"]);
+                        if (think.Trim().Length > 0)
+                            ConsoleUi.Think("  [思考] " + think + "\n");
+                    }
+                    if (m.ContainsKey("steps") && m["steps"] is List<object>)
+                    {
+                        List<object> steps = (List<object>)m["steps"];
+                        for (int i = 0; i < steps.Count; i++)
+                        {
+                            string st = Json.AsString(steps[i]);
+                            if (st.Length > 0)
+                                ConsoleUi.Dim("  ▶ " + st + "\n");
+                        }
+                    }
+                    if (content.Trim().Length > 0)
+                    {
+                        Console.WriteLine(content);
                         Console.WriteLine();
                     }
-                    Console.WriteLine(content);
-                    Console.WriteLine();
                 }
                 else if (role == "tool")
                 {
@@ -2875,8 +2850,10 @@ namespace Tau
             cancelled = false;
             AutoTitle(ctx, userMessage);
 
-            bool printedThink = false;
-            bool printedContent = false;
+            // 出力の種類。種類が変わったら改行を入れてから表示する。
+            //   0 = なし, 1 = 思考, 2 = ツール実行, 3 = 本文
+            const int KIND_NONE = 0, KIND_THINK = 1, KIND_TOOL = 2, KIND_CONTENT = 3;
+            int kind = KIND_NONE;
 
             Console.WriteLine();
             try
@@ -2885,30 +2862,40 @@ namespace Tau
                     delegate (SessionCtx c) { Save(c); },
                     delegate (string d)
                     {
-                        // 思考の直後に本文が来たら改行を入れて見やすくする
-                        if (printedThink && !printedContent) Console.WriteLine();
-                        if (!printedContent) printedContent = true;
+                        // 本文の開始(または種類の切り替わり)で改行する
+                        if (kind != KIND_CONTENT)
+                        {
+                            if (kind != KIND_NONE) Console.WriteLine();
+                            kind = KIND_CONTENT;
+                        }
                         Console.Write(d);
                     },
                     delegate (string d)
                     {
-                        if (!printedThink)
+                        if (kind != KIND_THINK)
                         {
-                            printedThink = true;
+                            if (kind != KIND_NONE) Console.WriteLine();
+                            kind = KIND_THINK;
                             Console.Write("  ");
                             ConsoleUi.Dim("[思考] ");
                         }
                         ConsoleUi.Think(d);
                     },
-                    delegate (string name, string detail) { ConsoleUi.Tool(name, detail); },
+                    delegate (string name, string detail)
+                    {
+                        // ツール実行は必ず単独の行にする
+                        if (kind != KIND_NONE) Console.WriteLine();
+                        ConsoleUi.Tool(name, detail);
+                        kind = KIND_NONE;   // ツール行は改行済みなので次はそのまま始められる
+                    },
                     delegate () { return cancelled; });
 
-                if (!printedContent && reply != null && reply.Length > 0)
+                if (kind != KIND_CONTENT && reply != null && reply.Length > 0)
                 {
-                    if (printedThink) Console.WriteLine();
+                    if (kind != KIND_NONE) Console.WriteLine();
                     Console.WriteLine(reply);
                 }
-                Console.WriteLine();
+                if (kind != KIND_NONE) Console.WriteLine();
             }
             catch (Exception ex)
             {
@@ -3216,8 +3203,6 @@ namespace Tau
                 Help = "API キー(表示時は伏せ字)" },
             new Field { Key = "model", Label = "Model", Kind = "string",
                 Help = "使用するモデル名" },
-            new Field { Key = "models", Label = "Models", Kind = "list",
-                Help = "登録するモデル名の一覧(カンマ区切り)" },
             new Field { Key = "allowTools", Label = "Allow Tools", Kind = "bool",
                 Help = "ツール実行の可否 (true/false)" },
             new Field { Key = "emitReasoning", Label = "Emit Reasoning", Kind = "bool",
@@ -3267,18 +3252,6 @@ namespace Tau
                 if (sv.Length <= 8) return new string('*', sv.Length);
                 return sv.Substring(0, 3) + "..." + new string('*', Math.Min(8, sv.Length - 3));
             }
-            if (f.Kind == "list")
-            {
-                List<object> arr = v as List<object>;
-                if (arr == null) return "";
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < arr.Count; i++)
-                {
-                    if (i > 0) sb.Append(", ");
-                    sb.Append(Json.AsString(arr[i]));
-                }
-                return sb.ToString();
-            }
             if (f.Kind == "text")
             {
                 string t = Json.AsString(v);
@@ -3318,22 +3291,6 @@ namespace Tau
                         else if (f.Key == "toolTimeoutSec") cfg.ToolTimeoutSec = n;
                         return true;
                     }
-                case "list":
-                    {
-                        string[] items = raw.Split(new char[] { ',' });
-                        List<string> list = new List<string>();
-                        for (int i = 0; i < items.Length; i++)
-                        {
-                            string nm = (items[i] ?? "").Trim();
-                            if (nm.Length == 0) continue;
-                            if (!list.Contains(nm)) list.Add(nm);
-                        }
-                        if (list.Count == 0) return false;
-                        cfg.Models = list;
-                        // 選択中モデルが一覧に無ければ先頭へ
-                        if (!cfg.Models.Contains(cfg.Model)) cfg.Model = cfg.Models[0];
-                        return true;
-                    }
                 default:
                     {
                         string s = raw;
@@ -3343,11 +3300,6 @@ namespace Tau
                         else if (f.Key == "model")
                         {
                             if (s.Length == 0) return false;
-                            if (!cfg.Models.Contains(s))
-                            {
-                                // 一覧に無いモデルは登録してから選ぶ
-                                cfg.Models.Add(s);
-                            }
                             cfg.Model = s;
                         }
                         else if (f.Key == "proxyUrl") cfg.ProxyUrl = s;

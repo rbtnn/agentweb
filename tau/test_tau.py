@@ -65,6 +65,42 @@ class Mock(BaseHTTPRequestHandler):
             chunk({}, "stop")
         self.wfile.write(b"data: [DONE]\n\n"); self.wfile.flush()
 
+class MockMulti(BaseHTTPRequestHandler):
+    """思考→ツール→思考→ツール→本文 と返すモック(改行の検証用)。"""
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        req = json.loads(self.rfile.read(n).decode() or "{}")
+        tool_results = sum(1 for m in req.get("messages", []) if m.get("role") == "tool")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def chunk(delta, fin=None):
+            c = {"id": "c", "object": "chat.completion.chunk", "created": 1,
+                 "model": "m", "choices": [{"index": 0, "delta": delta,
+                                            "finish_reason": fin}]}
+            self.wfile.write(("data: " + json.dumps(c, ensure_ascii=False) + "\n\n").encode())
+            self.wfile.flush()
+
+        chunk({"role": "assistant"})
+        chunk({"reasoning_content": "考え中です。"})
+        if tool_results == 0:
+            chunk({"tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                   "function": {"name": "list_dir", "arguments": "{\"path\":\".\"}"}}]})
+        elif tool_results == 1:
+            chunk({"reasoning_content": "もう一度考えます。"})
+            chunk({"tool_calls": [{"index": 0, "id": "c2", "type": "function",
+                   "function": {"name": "list_dir", "arguments": "{\"path\":\"/tmp\"}"}}]})
+        else:
+            chunk({"content": "最終的な回答です。"})
+        chunk({}, "stop")
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+
 class MockHttpError(BaseHTTPRequestHandler):
     """HTTP エラー(401 など)を返すモック。"""
     protocol_version = "HTTP/1.1"
@@ -131,7 +167,6 @@ def main():
             "llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % port,
             "llmApiKey": "sk-test",
             "model": "mock-model",
-            "models": ["mock-model", "other-model"],
             "allowTools": True,
             "emitReasoning": True,
             "contextWindow": 64000,
@@ -280,6 +315,13 @@ def main():
         ok("モデルの切り替えが tau.json に保存されます")
     else:
         bad("モデルが保存されていません: %r" % saved.get("model"))
+
+    # models 一覧は持たないので、未登録の名前でもそのまま受け付ける
+    out = run_tau("/model brand-new-model\n/model\n/exit\n")
+    if "brand-new-model" in out:
+        ok("/model は未登録のモデル名も受け付けます(models 一覧なし)")
+    else:
+        bad("/model が任意の名前を受け付けません: " + out[-400:])
     # tau が扱わないキーが保存で失われないこと
     kept = {"port": 8787, "theme": "light", "bindPath": ".",
             "openBrowserOnStart": False}
@@ -345,6 +387,46 @@ def main():
     else:
         bad("/new が同じセッションを開き直しています: %r" % ids)
 
+    # ---- 6d-2. 出力の種類が変わったら改行される ----
+    multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
+    multi_port = multi_srv.server_address[1]
+    threading.Thread(target=multi_srv.serve_forever, daemon=True).start()
+    multi_cfg = os.path.join(work, "multi.json")
+    with open(multi_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % multi_port,
+                   "llmApiKey": "k", "model": "m", "allowTools": True,
+                   "emitReasoning": True, "useSystemProxy": False}, f)
+    out = run_tau("テスト\n/exit\n", args=["--config", multi_cfg])
+    multi_srv.shutdown(); multi_srv.server_close()
+
+    # 「[思考] ...」「▶ ツール実行: ...」「最終的な回答です。」が
+    # それぞれ独立した行になっていること(前の出力に連結していないこと)
+    lines = out.splitlines()
+    think_lines = [l for l in lines if "[思考]" in l]
+    tool_lines = [l for l in lines if "▶ ツール実行:" in l]
+    reply_lines = [l for l in lines if "最終的な回答です。" in l]
+    if len(think_lines) >= 2 and len(tool_lines) >= 2 and reply_lines:
+        ok("思考・ツール実行・本文がそれぞれ表示されます")
+    else:
+        bad("出力が不足しています: think=%d tool=%d reply=%d"
+            % (len(think_lines), len(tool_lines), len(reply_lines)))
+
+    # 1 行の中に複数の種類が混ざっていないこと
+    mixed = [l for l in lines
+             if ("[思考]" in l and "▶" in l)
+             or ("[思考]" in l and "最終的な回答です。" in l)
+             or ("▶" in l and "最終的な回答です。" in l)]
+    if not mixed:
+        ok("種類の違う出力が同じ行に連結されません")
+    else:
+        bad("改行されず連結しています: %r" % mixed[:3])
+
+    # 本文は「[思考]」や「▶」の行に続けて書かれていないこと
+    if reply_lines and ("[思考]" not in reply_lines[0] and "▶" not in reply_lines[0]):
+        ok("本文は単独の行から始まります")
+    else:
+        bad("本文が前の出力に連結しています: %r" % reply_lines[:2])
+
     # ---- 6e. 設定コマンド ----
     out = run_tau("/config\n/exit\n")
     if "llmApiUrl" in out and "contextWindow" in out and "allowTools" in out:
@@ -369,16 +451,46 @@ def main():
     else:
         bad("/set の変更が保存されていません: %r"
             % {k: saved.get(k) for k in ("contextWindow", "allowTools")})
-
-    out = run_tau("/set models m1,m2,m3\n/set bogus 1\n/set contextWindow abc\n/exit\n")
-    if "m1, m2, m3" in out:
-        ok("/set models で一覧を変更できます")
+    if "models" not in saved:
+        ok("tau.json に models は保存されません")
     else:
-        bad("/set models が効いていません: " + out[-400:])
+        bad("tau.json に models が保存されています: %r" % saved.get("models"))
+
+    # 旧形式(models あり)の tau.json でも、保存時に models が取り除かれること
+    legacy_cfg = os.path.join(work, "legacy.json")
+    with open(legacy_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:9/v1", "llmApiKey": "k",
+                   "model": "m1", "models": ["m1", "m2"],
+                   "allowTools": False, "useSystemProxy": False,
+                   "myCustomKey": "keep-me"}, f, ensure_ascii=False)
+    run_tau("/model legacy-switch\n/exit\n", args=["--config", legacy_cfg])
+    with open(legacy_cfg, encoding="utf-8-sig") as f:
+        lg = json.load(f)
+    if "models" not in lg:
+        ok("旧 tau.json の models は保存時に取り除かれます")
+    else:
+        bad("旧 tau.json の models が残っています: %r" % lg.get("models"))
+    if lg.get("myCustomKey") == "keep-me":
+        ok("手で追記した未知のキーは保持されます")
+    else:
+        bad("未知のキーが失われました: %r" % lg.get("myCustomKey"))
+
+    out = run_tau("/set bogus 1\n/set contextWindow abc\n/exit\n")
     if "不明な設定項目" in out and "値が不正" in out:
         ok("/set は不正な key / 値を拒否します")
     else:
         bad("/set の入力チェックがありません")
+    # models オプションは廃止した
+    out = run_tau("/set models a,b\n/exit\n")
+    if "不明な設定項目" in out:
+        ok("models オプションは存在しません(廃止済み)")
+    else:
+        bad("models オプションがまだ残っています: " + out[-400:])
+    out = run_tau("/config\n/exit\n")
+    if "models" not in out:
+        ok("/config に models が表示されません")
+    else:
+        bad("/config に models が表示されています")
 
     out = run_tau("/config edit\n3\nedited-model\n/exit\n")
     if "edited-model" in out:

@@ -146,7 +146,6 @@ TAU_CONFIG
   "llmApiUrl": "https://api.openai.com/v1/chat/completions",
   "llmApiKey": "YOUR_API_KEY",
   "model": "gpt-4o-mini",
-  "models": ["gpt-4o-mini", "gpt-4o"],
   "allowTools": true,
   "emitReasoning": true,
   "maxToolsPerTurn": 16,
@@ -162,7 +161,11 @@ TAU_CONFIG
 }
 ```
 
-- `models` は**モデル名の一覧**です。接続先・API キー・コンテキスト上限は全モデル共通の 1 つを使います。
+- モデルは `model` に**1 つだけ**指定します。`models`（モデル名の一覧）は `tau` では使いません。
+  接続先・API キー・コンテキスト上限も共通の 1 つです。
+- `/model <名前>` は任意のモデル名を受け付けます（事前登録は不要）。
+- 既存の `tau.json` に `models` があっても無視され、保存時に取り除かれます
+  （`agentweb` 側の `models` はそのまま残ります）。
 - `tau` が扱わないキーを手で追記しても、保存時に失われません。
 
 ### プロンプトから設定を変更する
@@ -184,7 +187,6 @@ TAU_CONFIG
     llmApiUrl          = https://api.openai.com/v1/chat/completions
     llmApiKey          = sk-...********
     model              = gpt-4o-mini
-    models             = gpt-4o-mini, gpt-4o
     allowTools         = true
     emitReasoning      = true
     contextWindow      = 64000
@@ -395,6 +397,8 @@ python3 test_tau.py
 | ストリーミング | 思考と本文が表示されるか |
 | ツールループ | ツール実行 → 結果を LLM へ返して再問い合わせするか |
 | 設定の分離 | `tau.json` を参照し、`agentweb.json` に触れないか |
+| `models` 廃止 | `models` を使わず、保存時に取り除かれるか |
+| `/model` | 任意のモデル名を受け付けるか |
 | セッションの分離 | `%APPDATA%\tau\sessions` に保存し、agentweb 側を汚さないか |
 | セッション形式 | `agentweb` と同じキーで保存されるか |
 | `/config` | 設定一覧を表示し、API キーが伏せ字になるか |
