@@ -874,56 +874,66 @@ namespace Tau
         // 4.7 未満だと OS 既定が使われず TLS 1.0 のままになることがある。
         // そのため「SystemDefault で失敗したら TLS 1.2 を明示して再試行する」
         // という二段構えにする。
+        // 実行環境が SystemDefault(値 0) を受け付けるか。
+        // .NET Framework 4.7 以降でのみ有効で、それ以前は
+        //   「指定された値は 'SslProtocolType' 列挙で有効ではありません」
+        // になるため、実際に設定して確かめる。
+        static int systemDefaultOk = -1;   // -1=未確認, 0=不可, 1=可
+
+        // 外部から参照できるようにする(エラー表示用)
+        public static bool SystemDefaultUsable { get { return CanUseSystemDefault(); } }
+
+        static bool CanUseSystemDefault()
+        {
+            if (systemDefaultOk >= 0) return systemDefaultOk == 1;
+            try
+            {
+                object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
+                if (sd == null) { systemDefaultOk = 0; return false; }
+                // 値 0 を実際に設定してみる(受け付けなければ例外)
+                SecurityProtocolType old = ServicePointManager.SecurityProtocol;
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
+                systemDefaultOk = 1;
+                ServicePointManager.SecurityProtocol = old;
+            }
+            catch { systemDefaultOk = 0; }
+            return systemDefaultOk == 1;
+        }
+
+        // TLS の設定。
+        //
+        // TLS 1.2 は Windows 7 以降で必ず使えるため、これを既定にする。
+        // SystemDefault(値 0) は .NET Framework 4.7 以降でしか受け付けられず、
+        // それ以前では「SslProtocolType 列挙で有効ではありません」になるので、
+        // 使えると確認できた場合だけ採用する。
+        //
+        // Tls13 は Mono や古い .NET では解釈できず同じエラーになるため使わない。
+        // (TLS 1.3 しか受け付けないサーバは稀。TLS 1.2 で交渉できる)
         public static void ApplyTls()
         {
             lock (tlsLock)
             {
-                if (tlsStage == 0)
+                if (tlsStage == 0 && CanUseSystemDefault())
                 {
-                    // 第 0 段: OS に任せる
+                    // 第 0 段: OS に任せる(.NET 4.7 以降のみ)
                     try
                     {
                         object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
-                        if (sd != null)
-                        {
-                            ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
-                            return;
-                        }
+                        ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
+                        return;
                     }
-                    catch { }
-                    tlsStage = 1;   // SystemDefault が無い環境はすぐ第 1 段へ
+                    catch { tlsStage = 1; }
                 }
 
-                if (tlsStage == 1)
-                {
-                    // 第 1 段: TLS 1.2 を明示する。
-                    //
-                    // 注意: Tls12 に Tls13 を OR で混ぜてはいけない。
-                    // OS の Schannel 設定や .NET のバージョンで有効になっていない
-                    // プロトコルを要求すると、ハンドシェイク時に
-                    //   「指定された値は 'SslProtocolType' 列挙で有効ではありません。
-                    //     パラメーター名: sslProtocolType」
-                    // という ArgumentException になる。
-                    // TLS 1.2 は Windows 7 以降で必ず使えるため、単独指定が最も安全。
-                    try
-                    {
-                        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-                    }
-                    catch { }
-                    return;
-                }
-
-                // 第 2 段: 最後の手段として OS 既定に戻す
-                // (古い TLS しか使えないサーバ・プロキシ向け)
+                // 第 1 段: TLS 1.2 を単独で指定する(どの環境でも安全)
                 try
                 {
-                    object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
-                    if (sd != null)
-                        ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
-                    else
-                        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 }
-                catch { }
+                catch
+                {
+                    // それすら拒否される場合は何もせず既定のままにする
+                }
             }
         }
 
@@ -933,14 +943,15 @@ namespace Tau
         {
             lock (tlsLock)
             {
-                // 第 0 段(SystemDefault) → 第 1 段(Tls12) → 第 2 段(OS 既定)
-                // と一段ずつ上げる。同じ段で無限に再試行しない。
-                if (tlsStage < 2)
+                // 第 0 段(SystemDefault が使える場合のみ) → 第 1 段(Tls12)。
+                // 第 1 段で失敗したら、それ以上は設定を変えても改善しない
+                // (SystemDefault は .NET 4.7 未満で無効、Tls13 は Mono で無効)。
+                if (tlsStage < 1)
                 {
-                    tlsStage++;
+                    tlsStage = 1;
                     return true;
                 }
-                return false;   // これ以上上げられない
+                return false;
             }
         }
 
@@ -2612,7 +2623,8 @@ namespace Tau
                 {
                     ConsoleUi.Dim("  TLS のハンドシェイクに失敗しました。\n");
                     ConsoleUi.Dim("  ・接続先: " + cfg.ApiBaseUrl + "\n");
-                    ConsoleUi.Dim("  ・tau は SystemDefault → TLS 1.2 → OS 既定 の順に自動で再試行しました。\n");
+                    ConsoleUi.Dim("  ・tau は TLS 1.2 を指定して接続を試みました"
+                        + (LlmClient.SystemDefaultUsable ? "(SystemDefault も試行済み)" : "") + "。\n");
                     ConsoleUi.Dim("  ・それでも失敗する場合は、次のいずれかが原因です。\n");
                     ConsoleUi.Dim("    1) OS 側で TLS 1.2 が無効になっている\n");
                     ConsoleUi.Dim("       (Windows の「インターネットオプション」→ 詳細設定 →\n");

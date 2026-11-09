@@ -184,13 +184,12 @@ TLS 1.2 以上を要求する API（OpenAI 系・DeepSeek 系など）で次の�
 SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした
 ```
 
-`ApplyTls()` が**三段構え**で設定し、失敗するたびに一段上げて再試行します。
+`ApplyTls()` は **TLS 1.2 を既定**にし、`SystemDefault` が使える環境でのみそれを優先します。
 
-| 段 | 設定 | 内容 |
-|---|---|---|
-| 第 0 段 | `SecurityProtocolType.SystemDefault`（値 0） | OS に最適なバージョンを選ばせる |
-| 第 1 段 | `Tls12`（**単独**） | TLS 1.2 を明示する |
-| 第 2 段 | `SystemDefault`（最後の手段） | 古い TLS しか使えないサーバ・プロキシ向け |
+| 条件 | 設定 |
+|---|---|
+| `SystemDefault`（値 0）を受け付けられる環境（.NET Framework 4.7 以降） | `SystemDefault` |
+| それ以外（.NET Framework 4.6.1 以前 / Mono） | **`Tls12`** |
 
 ```
 > hi
@@ -200,19 +199,22 @@ SSL/TLS のセキュリティで保護されているチャネルを作成でき
 
 ### つまずきやすい点
 
-**`SystemDefault` は「使える」とは限りません。** 列挙値としては存在しますが（値 `0`）、
-**.NET Framework 4.6.1 以前をターゲットにしていると OS 既定が使われず TLS 1.0 のまま**になります。
-そのため「存在するから使う」で終わらせず、失敗したら次の段へ上げます。
-
-**`Tls12` に `Tls13` を OR で混ぜてはいけません。**
-OS の Schannel 設定や .NET のバージョンで有効になっていないプロトコルを要求すると、
-ハンドシェイク時に次のエラーになります。
+**`SystemDefault`（値 0）は .NET Framework 4.7 以降でしか使えません。**
+4.6.1 以前で設定すると、ハンドシェイク時に次のエラーになります。
 
 ```
 指定された値は 'SslProtocolType' 列挙で有効ではありません。パラメーター名:sslProtocolType
 ```
 
-TLS 1.2 は Windows 7 以降で必ず使えるため、**単独指定**が最も安全です。
+そのため `CanUseSystemDefault()` が**実際に設定して受け付けられるか確認**し、
+駄目なら `Tls12` に切り替えます（結果はキャッシュします）。
+
+**`Tls13` は使いません。** Mono や古い .NET では解釈できず、同じ `SslProtocolType`
+エラーになります。TLS 1.3 しか受け付けないサーバは稀で、通常は TLS 1.2 で交渉できます。
+
+**`Tls12` に `Tls13` を OR で混ぜてもいけません**（同じエラーになります）。
+
+TLS 1.2 は Windows 7 以降で必ず使えるため、**`Tls12` 単独指定が最も安全**です。
 
 ### TLS 失敗の判定
 
@@ -290,8 +292,8 @@ python3 test_tau.py
 | 再開 | `--session` で続きから開けるか（LLM を呼ばないか） |
 | コマンド | `/model` `/tools` が効き、設定に保存されるか |
 | エラー | API エラーで落ちずに表示して続行するか |
-| TLS | `SystemDefault` → `Tls12` → `SystemDefault` の三段構えか |
-| TLS 単独 | `Tls12` に `Tls13` を混ぜていないか |
+| TLS | `SystemDefault` の可否を確かめ、駄目なら `Tls12` にするか |
+| TLS 単独 | `Tls13` を使っていないか（Mono/古い .NET で無効） |
 | TLS 失敗 | `SecureChannelFailure` / `SslProtocolType` エラーを検出するか |
 | TLS 除外 | 証明書エラー（`TrustFailure`）は再試行しないか |
 | TLS 再試行 | ストリーミング/非ストリーミングの両方で再試行するか |

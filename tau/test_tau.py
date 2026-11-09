@@ -336,10 +336,14 @@ def main():
         ok("TLS バージョンを設定する処理(ApplyTls)があります")
     else:
         bad("ApplyTls がありません")
-    if "SystemDefault" in tls_src:
-        ok("第 1 段で OS に任せる SystemDefault を試します")
+    if "CanUseSystemDefault" in tls_src:
+        ok("SystemDefault が使えるかを実際に確かめています")
     else:
-        bad("SystemDefault を使っていません")
+        bad("SystemDefault の可否判定がありません")
+    if "systemDefaultOk" in tls_src:
+        ok("SystemDefault の可否をキャッシュしています")
+    else:
+        bad("SystemDefault の可否キャッシュがありません")
     if "SecurityProtocolType.Tls12" in tls_src:
         ok("第 2 段で TLS 1.2 を明示するフォールバックがあります")
     else:
@@ -358,10 +362,18 @@ def main():
         ok("TLS 1.3 を OR で混ぜていません(Tls12 単独指定)")
     else:
         bad("Tls12 に Tls13 を混ぜています(無効なプロトコル指定になる)")
-    if "tlsStage < 2" in tls_src:
-        ok("エスカレーションが 3 段階(無限再試行しない)")
+    if "tlsStage < 1" in tls_src:
+        ok("エスカレーションが 2 段階(無限再試行しない)")
     else:
         bad("エスカレーションの段数制御がありません")
+    # SystemDefault(値0) は .NET Framework 4.7 未満で無効。
+    # 無条件に設定すると SslProtocolType エラーになるため、
+    # 可否を確かめてから使う必要がある。
+    if "ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;\n                systemDefaultOk = 1;" in tls_src \
+       or "systemDefaultOk = 1;" in tls_src:
+        ok("SystemDefault を実際に設定して可否を判定しています")
+    else:
+        bad("SystemDefault の可否を実際に試していません")
     # 実測された症状: Status=ReceiveFailure + 内部例外
     # 「指定された値は 'SslProtocolType' 列挙で有効ではありません」
     # も TLS の設定不備として再試行対象にする必要がある。
