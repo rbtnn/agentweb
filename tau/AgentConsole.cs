@@ -75,6 +75,7 @@ namespace Tau
             Console.WriteLine("  /new         新しいセッションを開始");
             Console.WriteLine("  /sessions    保存済みセッションの一覧");
             Console.WriteLine("  /open <id>   指定したセッションを開く");
+            Console.WriteLine("  /delete <n>  セッションを削除 (番号は /sessions で確認)");
             Console.WriteLine("  /config      現在の設定を表示");
             Console.WriteLine("  /config edit 対話形式で設定を変更");
             Console.WriteLine("  /set <k> <v> 設定を 1 項目だけ変更 (例: /set model gpt-4o)");
@@ -768,12 +769,30 @@ namespace Tau
             return list;
         }
 
-        public void Delete(string id)
+        // セッションを削除する。成功なら true。
+        public bool Delete(string id)
         {
+            if (id == null || id.Trim().Length == 0) return false;
             string f = FileOf(id);
-            if (File.Exists(f))
+            if (!File.Exists(f)) return false;
+            try
             {
-                try { File.Delete(f); } catch { }
+                File.Delete(f);
+
+                // 「最後に開いていたセッション」が削除した ID を指していたら消す
+                Dictionary<string, object> st = LoadState();
+                if (st.ContainsKey("lastSession")
+                    && Sanitize(Json.AsString(st["lastSession"])) == Sanitize(id))
+                {
+                    st.Remove("lastSession");
+                    SaveState(st);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ConsoleUi.Danger("  削除に失敗しました: " + ex.Message + "\n");
+                return false;
             }
         }
 
@@ -2608,6 +2627,11 @@ namespace Tau
                     ShowSessions();
                     return true;
 
+                case "/delete":
+                case "/del":
+                    DeleteSession(arg);
+                    return true;
+
                 case "/open":
                     if (arg.Length == 0) { ConsoleUi.Danger("使い方: /open <セッションID>\n"); return true; }
                     {
@@ -2710,6 +2734,7 @@ namespace Tau
             }
         }
 
+        // 一覧に番号を振って表示する(/delete で番号を指定できるようにするため)
         void ShowSessions()
         {
             List<object> list = store.List();
@@ -2723,7 +2748,86 @@ namespace Tau
                 string title = Json.AsString(s.ContainsKey("title") ? s["title"] : "");
                 int count = s.ContainsKey("count") ? Json.AsInt(s["count"]) : 0;
                 string mark = (id == ctx.Id) ? "* " : "  ";
-                Console.WriteLine(mark + id + "  " + title + "  (" + count + " 件)");
+                Console.WriteLine(mark + (i + 1).ToString().PadLeft(2) + ". "
+                    + id + "  " + title + "  (" + count + " 件)");
+            }
+            Console.WriteLine();
+            ConsoleUi.Dim("  * = 現在のセッション。削除は /delete <番号|ID>\n");
+        }
+
+        // 番号(1 始まり)または ID からセッション ID を解決する
+        string ResolveSessionId(string arg)
+        {
+            string a = (arg ?? "").Trim();
+            if (a.Length == 0) return "";
+
+            int n;
+            if (int.TryParse(a, out n))
+            {
+                List<object> list = store.List();
+                if (n >= 1 && n <= list.Count)
+                {
+                    Dictionary<string, object> s = list[n - 1] as Dictionary<string, object>;
+                    if (s != null && s.ContainsKey("id")) return Json.AsString(s["id"]);
+                }
+                return "";
+            }
+            return a;   // ID として扱う
+        }
+
+        // セッションを削除する
+        void DeleteSession(string arg)
+        {
+            if ((arg ?? "").Trim().Length == 0)
+            {
+                ConsoleUi.Danger("削除するセッションを指定してください\n");
+                ConsoleUi.Dim("  使い方: /delete <番号|ID>   (番号は /sessions で確認)\n");
+                return;
+            }
+
+            string id = ResolveSessionId(arg);
+            if (id.Length == 0)
+            {
+                ConsoleUi.Danger("その番号のセッションはありません: " + arg + "\n");
+                ConsoleUi.Dim("  /sessions で番号を確認してください\n");
+                return;
+            }
+
+            Dictionary<string, object> meta = store.Load(id);
+            if (meta == null)
+            {
+                ConsoleUi.Danger("そのセッションは存在しません: " + arg + "\n");
+                return;
+            }
+
+            string title = meta.ContainsKey("title") ? Json.AsString(meta["title"]) : "";
+
+            // 誤操作を防ぐため確認する
+            Console.Write("  削除しますか？ " + id + "  (" + title + ")  [y/N]: ");
+            string ans;
+            try { ans = Console.ReadLine(); }
+            catch { ans = null; }
+            ans = (ans == null) ? "" : ans.Trim().ToLowerInvariant();
+            if (ans != "y" && ans != "yes")
+            {
+                ConsoleUi.Dim("  中止しました\n");
+                return;
+            }
+
+            bool wasCurrent = (id == ctx.Id);
+            if (!store.Delete(id))
+            {
+                ConsoleUi.Danger("削除できませんでした: " + id + "\n");
+                return;
+            }
+            ConsoleUi.Info("削除しました: " + id + "  (" + title + ")");
+
+            // 表示中のセッションを消した場合は、別のセッションへ切り替える
+            if (wasCurrent)
+            {
+                ctx = LoadOrCreate("", true);
+                ConsoleUi.Info("セッションを切り替えました: " + ctx.Id + "  (" + ctx.Title + ")");
+                PrintHistory(ctx);
             }
         }
 

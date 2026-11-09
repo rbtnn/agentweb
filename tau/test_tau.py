@@ -399,6 +399,68 @@ def main():
     else:
         bad("agentweb.json が変更されました")
 
+    # ---- 6f. セッションの削除 ----
+    out = run_tau("/sessions\n/exit\n")
+    if "削除は /delete" in out:
+        ok("/sessions に削除方法の案内が出ます")
+    else:
+        bad("/sessions に案内がありません: " + out[-300:])
+
+    # 追加で 2 セッション作り、番号指定で削除する
+    run_tau("/new\n/exit\n")
+    run_tau("/new\n/exit\n")
+    before = [f for f in os.listdir(sdir) if f.endswith(".json") and not f.startswith("_")]
+    if len(before) >= 3:
+        ok("削除テスト用に複数セッションがあります (%d 件)" % len(before))
+    else:
+        bad("セッションが足りません: %d 件" % len(before))
+
+    out = run_tau("/delete 1\nn\n/exit\n")
+    after = [f for f in os.listdir(sdir) if f.endswith(".json") and not f.startswith("_")]
+    if "中止しました" in out and len(after) == len(before):
+        ok("/delete で n を選ぶと削除されません")
+    else:
+        bad("中止が効いていません: %r -> %r" % (before, after))
+
+    # 表示中のセッション以外を消す。表示中を消すと代替のセッションが作られて
+    # 件数が変わらないため、lastSession 以外の ID を対象にする。
+    ids = []
+    for f in sorted(os.listdir(sdir)):
+        if f.endswith(".json") and not f.startswith("_"):
+            ids.append(f[:-5])
+    last = ""
+    st_path2 = os.path.join(sdir, "_state.json")
+    if os.path.exists(st_path2):
+        with open(st_path2, encoding="utf-8-sig") as f:
+            last = json.load(f).get("lastSession", "")
+    target = ""
+    for i in ids:
+        if i != last:
+            target = i
+            break
+    if not target:
+        bad("削除対象のセッションを選べませんでした")
+        return 1
+    out = run_tau("/delete " + target + "\ny\n/exit\n")
+    after = [f for f in os.listdir(sdir) if f.endswith(".json") and not f.startswith("_")]
+    if "削除しました" in out and target not in [f[:-5] for f in after] \
+       and len(after) == len(before) - 1:
+        ok("/delete で y を選ぶとセッションが削除されます")
+    else:
+        bad("削除が効いていません: target=%r %d -> %d" % (target, len(before), len(after)))
+
+    out = run_tau("/delete\n/exit\n")
+    if "指定してください" in out:
+        ok("/delete を引数なしで実行すると使い方を表示します")
+    else:
+        bad("/delete の引数チェックがありません")
+
+    out = run_tau("/delete 99\n/exit\n")
+    if "番号のセッションはありません" in out:
+        ok("/delete は存在しない番号を拒否します")
+    else:
+        bad("/delete の番号チェックがありません: " + out[-300:])
+
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
     # TLS 1.2 以上を要求する API で
