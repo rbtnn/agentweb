@@ -926,6 +926,61 @@ namespace Tau
             request.ContentLength = payload.Length;
             request.Timeout = 180000;
             request.ReadWriteTimeout = 180000;
+
+            // SSE は応答が長く続くため、次の設定が重要になる。
+            //  - Expect: 100-continue は一部のプロキシ/サーバで
+            //    「受信時に予期しないエラー」の原因になるので無効化する。
+            //  - HTTP/1.1 で KeepAlive を有効にし、接続を使い回す。
+            //  - 途中で切れないよう、バッファリングを小さめにする必要は無いが、
+            //    Nagle を無効にして小さなチャンクを即座に送る。
+            request.ServicePoint.Expect100Continue = false;
+            request.KeepAlive = true;
+            request.ProtocolVersion = HttpVersion.Version11;
+            request.ServicePoint.UseNagleAlgorithm = false;
+            // 応答がチャンク形式で届く場合に備える
+            request.SendChunked = false;
+            request.AllowReadStreamBuffering = false;
+            request.AllowWriteStreamBuffering = true;
+        }
+
+        // WebException の内容を、原因が分かる形に整形する
+        public static string DescribeWebException(WebException wex)
+        {
+            if (wex == null) return "";
+            StringBuilder sb = new StringBuilder();
+            sb.Append(wex.Message);
+            sb.Append(" (status=").Append(wex.Status).Append(")");
+
+            // HTTP ステータスが返っている場合は本文も読む(原因が書かれていることが多い)
+            if (wex.Response != null)
+            {
+                try
+                {
+                    HttpWebResponse resp = wex.Response as HttpWebResponse;
+                    if (resp != null) sb.Append(" [HTTP ").Append((int)resp.StatusCode).Append("]");
+                    using (Stream rs = wex.Response.GetResponseStream())
+                    {
+                        string body = ToolExecutor.DecodeBytesPublic(ToolExecutor.ReadAllBytesPublic(rs));
+                        if (body.Length > 0)
+                        {
+                            if (body.Length > 400) body = body.Substring(0, 400) + "...";
+                            sb.Append(" ").Append(body);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 内部例外(TLS ハンドシェイク失敗など)は原因がここに出る
+            Exception inner = wex.InnerException;
+            int depth = 0;
+            while (inner != null && depth < 3)
+            {
+                sb.Append(" <- ").Append(inner.Message);
+                inner = inner.InnerException;
+                depth++;
+            }
+            return sb.ToString();
         }
 
         // API に送るメッセージから、保存専用メタデータ(ts/steps/think)を取り除く
@@ -981,7 +1036,7 @@ namespace Tau
             }
             catch (WebException wex)
             {
-                throw new Exception("LLM API エラー: " + wex.Message);
+                throw new Exception("LLM API エラー: " + DescribeWebException(wex));
             }
             finally
             {
@@ -1068,13 +1123,14 @@ namespace Tau
                     }
                     else
                     {
+                        bool sawDone = false;   // [DONE] を受け取ったか(正常終了の目印)
                         string line;
                         while ((line = sr.ReadLine()) != null)
                         {
                             if (line.Length == 0) continue;
                             if (!line.StartsWith("data:")) continue;
                             string data = line.Substring(5).Trim();
-                            if (data == "[DONE]") break;
+                            if (data == "[DONE]") { sawDone = true; break; }
 
                             object parsed;
                             try { parsed = Json.Parse(data); }
@@ -1135,13 +1191,30 @@ namespace Tau
                                 }
                             }
                         }
+
+                        // [DONE] を受け取らずにストリームが終わった場合は、
+                        // 応答が途中で切れている(通信断・サーバ側のタイムアウト等)。
+                        // 黙って途中までの本文を確定させない。
+                        if (!sawDone && content.Length > 0)
+                        {
+                            throw new Exception("LLM API(stream)エラー: 応答が途中で切断されました"
+                                + "(受信済み " + content.Length + " 文字)。"
+                                + " もう一度お試しください。");
+                        }
                     }
                 }
             }
             catch (WebException wex)
             {
                 if (wex.Status == WebExceptionStatus.RequestCanceled) throw new LlmCancelledException();
-                throw new Exception("LLM API(stream)エラー: " + wex.Message);
+                throw new Exception("LLM API(stream)エラー: " + DescribeWebException(wex));
+            }
+            catch (IOException iex)
+            {
+                // ストリーム読み取り中の切断(「受信時に予期しないエラー」など)
+                throw new Exception("LLM API(stream)エラー: 接続が切断されました: " + iex.Message
+                    + " (受信済み " + content.Length + " 文字)"
+                    + "。ネットワーク/プロキシのタイムアウトや、サーバ側の応答中断が考えられます。");
             }
             finally
             {
@@ -1621,6 +1694,10 @@ namespace Tau
         }
 
         // ---------------- 文字コード判定 ----------------
+
+        // エラー応答の本文読み取り用に外部から使えるようにしたもの
+        public static string DecodeBytesPublic(byte[] data) { return DecodeBytes(data); }
+        public static byte[] ReadAllBytesPublic(Stream s) { return ReadAllBytes(s); }
 
         static string DecodeBytes(byte[] data)
         {
@@ -2155,11 +2232,14 @@ namespace Tau
 
         // ---------------- セッションの読み込み ----------------
 
-        SessionCtx LoadOrCreate(string wantId)
+        // resume=true なら前回のセッションを開き、false なら必ず新規作成する。
+        SessionCtx LoadOrCreate(string wantId, bool resume)
         {
             string id = "";
             if (wantId != null && wantId.Trim().Length > 0) id = wantId.Trim();
-            if (id.Length == 0) id = store.LastSessionId();   // agentweb と共有している再開先
+            // 再開指定のときだけ「最後に開いていたセッション」を使う。
+            // /new では使わない(使うと直前と同じセッションが開き直されてしまう)。
+            if (id.Length == 0 && resume) id = store.LastSessionId();
 
             if (id.Length > 0)
             {
@@ -2207,7 +2287,7 @@ namespace Tau
 
         public void Run(string sessionArg)
         {
-            ctx = LoadOrCreate(sessionArg);
+            ctx = LoadOrCreate(sessionArg, true);
             bool resumed = ctx.Messages.Count > 0;
             ConsoleUi.Banner(cfg, ctx, resumed);
 
@@ -2263,7 +2343,7 @@ namespace Tau
                     return true;
 
                 case "/new":
-                    ctx = LoadOrCreate("");
+                    ctx = LoadOrCreate("", false);   // 必ず新しいセッションを作る
                     ConsoleUi.Info("新しいセッションを開始しました: " + ctx.Id);
                     return true;
 

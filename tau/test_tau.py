@@ -65,6 +65,43 @@ class Mock(BaseHTTPRequestHandler):
             chunk({}, "stop")
         self.wfile.write(b"data: [DONE]\n\n"); self.wfile.flush()
 
+class MockHttpError(BaseHTTPRequestHandler):
+    """HTTP エラー(401 など)を返すモック。"""
+    protocol_version = "HTTP/1.1"
+    code = 401
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(n)
+        body = json.dumps({"error": {"message": "Invalid API key"}}).encode()
+        self.send_response(MockHttpError.code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class MockTruncate(BaseHTTPRequestHandler):
+    """ストリームの途中で接続を切るモック([DONE] を送らない)。"""
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(n)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        c = {"id": "c", "object": "chat.completion.chunk", "created": 1,
+             "model": "m", "choices": [{"index": 0,
+             "delta": {"content": "途中まで"}, "finish_reason": None}]}
+        self.wfile.write(("data: " + json.dumps(c) + "\n\n").encode())
+        self.wfile.flush()
+        self.close_connection = True
+        try: self.connection.close()
+        except Exception: pass
+
+
 # --------------------------------------------------------------------------
 def main():
     exe = os.path.join(tempfile.mkdtemp(prefix="tau_build_"), "tau.exe")
@@ -243,6 +280,51 @@ def main():
         ok("API エラー時も落ちずにエラー表示して続行します")
     else:
         bad("API エラー時の挙動が想定と違います: " + out[-400:])
+
+    # ---- 6b. HTTP エラーの内容が表示される ----
+    err_srv = HTTPServer(("127.0.0.1", 0), MockHttpError)
+    err_port = err_srv.server_address[1]
+    threading.Thread(target=err_srv.serve_forever, daemon=True).start()
+    err_cfg = os.path.join(work, "err.json")
+    with open(err_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % err_port,
+                   "llmApiKey": "k", "model": "m", "allowTools": False,
+                   "useSystemProxy": False}, f)
+    out = run_tau("hi\n/exit\n", args=["--config", err_cfg])
+    if "401" in out:
+        ok("HTTP エラー時にステータスコードが表示されます")
+    else:
+        bad("HTTP ステータスが表示されません: " + out[-400:])
+    if "Invalid API key" in out:
+        ok("HTTP エラー時にレスポンス本文が表示されます")
+    else:
+        bad("エラー本文が表示されません: " + out[-400:])
+    err_srv.shutdown(); err_srv.server_close()
+
+    # ---- 6c. 途中で切断された応答は黙って確定しない ----
+    tr_srv = HTTPServer(("127.0.0.1", 0), MockTruncate)
+    tr_port = tr_srv.server_address[1]
+    threading.Thread(target=tr_srv.serve_forever, daemon=True).start()
+    tr_cfg = os.path.join(work, "tr.json")
+    with open(tr_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % tr_port,
+                   "llmApiKey": "k", "model": "m", "allowTools": False,
+                   "useSystemProxy": False}, f)
+    out = run_tau("hi\n/exit\n", args=["--config", tr_cfg])
+    if "切断" in out:
+        ok("途中で切断された応答はエラーとして報告されます")
+    else:
+        bad("切断が検出されません(途中までの本文を確定してしまう): " + out[-400:])
+    tr_srv.shutdown(); tr_srv.server_close()
+
+    # ---- 6d. /new は必ず別のセッションになる ----
+    out = run_tau("/new\n/new\n/exit\n")
+    ids = [ln.split(":")[-1].strip() for ln in out.splitlines()
+           if "新しいセッションを開始しました" in ln]
+    if len(ids) == 2 and ids[0] != ids[1]:
+        ok("/new で毎回異なるセッションが作られます")
+    else:
+        bad("/new が同じセッションを開き直しています: %r" % ids)
 
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
