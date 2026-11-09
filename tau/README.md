@@ -39,6 +39,8 @@ tau.exe [オプション]
   --config <path>    設定ファイル（agentweb.json）のパス
   --session <id>     既存セッションを開いて続きから対話する
   --list             保存済みセッションの一覧を表示して終了
+  --diag             接続診断(TLS/HTTP)を実行して終了
+  --debug            デバッグ出力を有効にする（TAU_DEBUG=1 と同じ）
   --help, -h, /?     ヘルプを表示
 ```
 
@@ -184,61 +186,54 @@ TLS 1.2 以上を要求する API（OpenAI 系・DeepSeek 系など）で次の�
 SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした
 ```
 
-`ApplyTls()` は **TLS 1.2 を既定**にし、`SystemDefault` が使える環境でのみそれを優先します。
+`ApplyTls()` は **`Tls12` を単独で指定**します。`SystemDefault` も `Tls13` も使いません。
 
-| 条件 | 設定 |
+| 項目 | 理由 |
 |---|---|
-| `SystemDefault`（値 0）を受け付けられる環境（.NET Framework 4.7 以降） | `SystemDefault` |
-| それ以外（.NET Framework 4.6.1 以前 / Mono） | **`Tls12`** |
+| `SystemDefault`（値 0）を使わない | .NET Framework 4.7 未満では設定自体が拒否され、`SslProtocolType` エラーになる。設定できても実効値が TLS 1.0 のままになることがある |
+| `Tls13` を使わない | Mono や古い .NET では解釈できず、同じ `SslProtocolType` エラーになる |
+| `Tls12` を単独指定 | Windows 7 以降で必ず使えるため最も安全 |
+
+### デバッグと接続診断
+
+うまく接続できない場合は、**接続診断**を実行してください。
 
 ```
-> hi
-  · TLS の設定を変更して再試行します…
-再試行で成功
+tau.exe --diag
 ```
 
-### つまずきやすい点
-
-**`SystemDefault`（値 0）は .NET Framework 4.7 以降でしか使えません。**
-4.6.1 以前で設定すると、ハンドシェイク時に次のエラーになります。
+環境情報（.NET / Mono / OS / 既定の TLS）、接続先の DNS、**TLS の各バージョンでの接続可否**、
+実際の API 呼び出し結果を表示します。
 
 ```
-指定された値は 'SslProtocolType' 列挙で有効ではありません。パラメーター名:sslProtocolType
+  [TLS の接続試験]
+    SystemDefault : NG  TrustFailure: ...
+    Tls12         : OK  HTTP 200 (1.1)
+    Tls11         : NG  SecureChannelFailure: ...
 ```
 
-そのため `CanUseSystemDefault()` が**実際に設定して受け付けられるか確認**し、
-駄目なら `Tls12` に切り替えます（結果はキャッシュします）。
+`Tls12` が `OK` なら接続は成立します。すべて `NG` の場合は OS / .NET / プロキシ側の
+TLS 設定を確認してください。
 
-**`Tls13` は使いません。** Mono や古い .NET では解釈できず、同じ `SslProtocolType`
-エラーになります。TLS 1.3 しか受け付けないサーバは稀で、通常は TLS 1.2 で交渉できます。
-
-**`Tls12` に `Tls13` を OR で混ぜてもいけません**（同じエラーになります）。
-
-TLS 1.2 は Windows 7 以降で必ず使えるため、**`Tls12` 単独指定が最も安全**です。
-
-### TLS 失敗の判定
-
-次のいずれかを「TLS の設定不備」とみなし、一段上げて再試行します。
-
-- `WebExceptionStatus.SecureChannelFailure`
-- 内部例外が TLS / SslStream / Authentication 系
-- 内部例外が `ArgumentException` で、メッセージに `SslProtocolType` を含む
-  （無効なプロトコルを要求したときの実際の症状）
-
-証明書の問題（`TrustFailure`）は再試行しても直らないため**対象外**です。
-再試行は段の上限（2）までで、無限ループにはなりません。
-
-この設定は **LLM 呼び出し**と **`curl` ツール**の両方に適用されます。
-
-それでも失敗する場合は、原因の切り分けのため次の情報を表示します。
+さらに詳しく見たい場合は**デバッグ出力**を有効にします。
 
 ```
-⚠ エラー: LLM API(stream)エラー: ... (status=SecureChannelFailure)
-  TLS のハンドシェイクに失敗しました。
-  ・接続先: https://...
-  ・.NET Framework 4.6.1 以前をターゲットにしていると、…
-  ・プロキシ経由の場合は、プロキシ側の TLS 対応も確認してください。
+tau.exe --debug            (または環境変数 TAU_DEBUG=1)
 ```
+
+リクエストの設定（TLS・プロキシ・HTTP バージョン・タイムアウト）、応答ヘッダ、
+SSE の先頭行、例外の連鎖、再試行の判断が `stderr` に表示されます。
+
+```
+[debug] TLS: SystemDefault(0) -> Tls12(3072)
+[debug]   URL      : https://...
+[debug]   Proxy    : null(直接接続)
+[debug]   HTTP     : 1.1
+[debug] WebException: status=TrustFailure
+[debug]   連鎖: System.Net.WebException: ... <- AuthenticationException: ...
+```
+
+エラー時は `TAU_DEBUG=1` の案内も表示されます。
 
 ### 通信エラーの表示
 
@@ -292,8 +287,9 @@ python3 test_tau.py
 | 再開 | `--session` で続きから開けるか（LLM を呼ばないか） |
 | コマンド | `/model` `/tools` が効き、設定に保存されるか |
 | エラー | API エラーで落ちずに表示して続行するか |
-| TLS | `SystemDefault` の可否を確かめ、駄目なら `Tls12` にするか |
-| TLS 単独 | `Tls13` を使っていないか（Mono/古い .NET で無効） |
+| TLS | `SystemDefault`/`Tls13` を使わず `Tls12` 単独か |
+| 診断 | `--diag` が TLS 各バージョンの接続可否を出すか |
+| デバッグ | `--debug` / `TAU_DEBUG` で詳細が出るか |
 | TLS 失敗 | `SecureChannelFailure` / `SslProtocolType` エラーを検出するか |
 | TLS 除外 | 証明書エラー（`TrustFailure`）は再試行しないか |
 | TLS 再試行 | ストリーミング/非ストリーミングの両方で再試行するか |

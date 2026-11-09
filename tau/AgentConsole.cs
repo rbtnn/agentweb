@@ -33,6 +33,7 @@ namespace Tau
             string configPath = "";
             string sessionArg = "";
             bool help = false;
+            bool diag = false;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -43,11 +44,16 @@ namespace Tau
                 else if (a.StartsWith("--session=")) sessionArg = a.Substring("--session=".Length);
                 else if (a == "--help" || a == "-h" || a == "/?") help = true;
                 else if (a == "--list") { ListSessions(configPath); return; }
+                else if (a == "--debug") LlmClient.EnableDebug();
+                else if (a == "--diag") diag = true;
             }
 
             if (help) { PrintHelp(); return; }
 
             Config cfg = new Config(configPath);
+
+            if (diag) { Diagnostics.Run(cfg); return; }
+
             Chat chat = new Chat(cfg);
             chat.Run(sessionArg);
         }
@@ -60,6 +66,8 @@ namespace Tau
             Console.WriteLine("  --config <path>    設定ファイル(agentweb.json)のパス");
             Console.WriteLine("  --session <id>     既存セッションを開いて続きから対話する");
             Console.WriteLine("  --list             保存済みセッションの一覧を表示して終了");
+            Console.WriteLine("  --diag             接続診断(TLS/HTTP)を実行して終了");
+            Console.WriteLine("  --debug            デバッグ出力を有効にする (TAU_DEBUG=1 と同じ)");
             Console.WriteLine("  --help, -h, /?     このヘルプを表示");
             Console.WriteLine();
             Console.WriteLine("対話中に使えるコマンド:");
@@ -855,103 +863,127 @@ namespace Tau
         // 処理中のリクエスト(Ctrl+C で中断するため)
         static volatile HttpWebRequest current;
 
-        // TLS の設定段階。
-        //   0 = SystemDefault (OS に任せる) を試す
-        //   1 = 明示的に TLS 1.2 以上を指定する
-        static int tlsStage;
+        // ---- デバッグ出力 ----
+        // 環境変数 TAU_DEBUG=1 で有効になる。既定は無効(通常利用では出さない)。
+        static bool debugOn = (Environment.GetEnvironmentVariable("TAU_DEBUG") ?? "") == "1";
+
+        public static bool DebugOn { get { return debugOn; } }
+
+        public static void EnableDebug() { debugOn = true; }
+
+        public static void Dbg(string msg)
+        {
+            if (!debugOn) return;
+            Console.Error.WriteLine("[debug] " + msg);
+        }
+
+        // 例外の連鎖を 1 行にまとめる(型名とメッセージ)
+        public static string ExceptionChain(Exception ex)
+        {
+            StringBuilder sb = new StringBuilder();
+            Exception e = ex;
+            int depth = 0;
+            while (e != null && depth < 6)
+            {
+                if (depth > 0) sb.Append("\n           <- ");
+                sb.Append(e.GetType().FullName).Append(": ").Append(e.Message);
+                e = e.InnerException;
+                depth++;
+            }
+            return sb.ToString();
+        }
+
+        // ---- TLS ----
+
         static readonly object tlsLock = new object();
+        static bool tlsApplied;
+
+        // 実行環境の TLS 関連情報をまとめる(デバッグ用)
+        public static string DescribeEnvironment()
+        {
+            StringBuilder sb = new StringBuilder();
+            try
+            {
+                sb.Append("runtime=").Append(Environment.Version);
+                sb.Append(" mono=").Append(Type.GetType("Mono.Runtime") != null ? "yes" : "no");
+                sb.Append(" os=").Append(Environment.OSVersion);
+            }
+            catch { }
+            try
+            {
+                sb.Append(" SecurityProtocol=").Append(ServicePointManager.SecurityProtocol)
+                  .Append("(").Append((int)ServicePointManager.SecurityProtocol).Append(")");
+            }
+            catch (Exception ex) { sb.Append(" SecurityProtocol=<").Append(ex.Message).Append(">"); }
+            try
+            {
+                sb.Append(" enum=[").Append(string.Join(", ",
+                    Enum.GetNames(typeof(SecurityProtocolType)))).Append("]");
+            }
+            catch { }
+            return sb.ToString();
+        }
 
         // TLS のバージョンを設定する。
         //
-        // 何もしないと、.NET Framework 4.6.1 以前をターゲットにしたアプリでは
-        // 既定が Ssl3|Tls (TLS 1.0) 相当になり、TLS 1.2 以上を要求する API
-        // (OpenAI 系・DeepSeek 系・多くのプロキシ) で
-        //   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした
-        //    (status=SecureChannelFailure)」
-        // になる。
+        // SystemDefault(値 0) は使わない。
+        //  - .NET Framework 4.7 未満では設定自体が拒否され
+        //    「指定された値は 'SslProtocolType' 列挙で有効ではありません」
+        //    になる。
+        //  - 設定できたとしても、4.6.1 以前をターゲットにしたアプリでは
+        //    実効値が TLS 1.0 のままになる。
+        //  - Mono でも受け付け方は環境依存で、実際の交渉は保証されない。
         //
-        // SystemDefault は列挙値としては存在するが、ターゲットフレームワークが
-        // 4.7 未満だと OS 既定が使われず TLS 1.0 のままになることがある。
-        // そのため「SystemDefault で失敗したら TLS 1.2 を明示して再試行する」
-        // という二段構えにする。
-        // 実行環境が SystemDefault(値 0) を受け付けるか。
-        // .NET Framework 4.7 以降でのみ有効で、それ以前は
-        //   「指定された値は 'SslProtocolType' 列挙で有効ではありません」
-        // になるため、実際に設定して確かめる。
-        static int systemDefaultOk = -1;   // -1=未確認, 0=不可, 1=可
-
-        // 外部から参照できるようにする(エラー表示用)
-        public static bool SystemDefaultUsable { get { return CanUseSystemDefault(); } }
-
-        static bool CanUseSystemDefault()
-        {
-            if (systemDefaultOk >= 0) return systemDefaultOk == 1;
-            try
-            {
-                object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
-                if (sd == null) { systemDefaultOk = 0; return false; }
-                // 値 0 を実際に設定してみる(受け付けなければ例外)
-                SecurityProtocolType old = ServicePointManager.SecurityProtocol;
-                ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
-                systemDefaultOk = 1;
-                ServicePointManager.SecurityProtocol = old;
-            }
-            catch { systemDefaultOk = 0; }
-            return systemDefaultOk == 1;
-        }
-
-        // TLS の設定。
+        // Tls13 も使わない。
+        //  - Mono や古い .NET では解釈できず、同じ SslProtocolType エラーになる。
         //
-        // TLS 1.2 は Windows 7 以降で必ず使えるため、これを既定にする。
-        // SystemDefault(値 0) は .NET Framework 4.7 以降でしか受け付けられず、
-        // それ以前では「SslProtocolType 列挙で有効ではありません」になるので、
-        // 使えると確認できた場合だけ採用する。
-        //
-        // Tls13 は Mono や古い .NET では解釈できず同じエラーになるため使わない。
-        // (TLS 1.3 しか受け付けないサーバは稀。TLS 1.2 で交渉できる)
+        // TLS 1.2 は Windows 7 以降で必ず使えるため、これを単独で指定するのが
+        // 最も安全で確実。
         public static void ApplyTls()
         {
             lock (tlsLock)
             {
-                if (tlsStage == 0 && CanUseSystemDefault())
-                {
-                    // 第 0 段: OS に任せる(.NET 4.7 以降のみ)
-                    try
-                    {
-                        object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
-                        ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
-                        return;
-                    }
-                    catch { tlsStage = 1; }
-                }
-
-                // 第 1 段: TLS 1.2 を単独で指定する(どの環境でも安全)
+                string before = SafeCurrentTls();
                 try
                 {
                     ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                    tlsApplied = true;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // それすら拒否される場合は何もせず既定のままにする
+                    Dbg("TLS: Tls12 の設定に失敗: " + ex.Message);
                 }
+                Dbg("TLS: " + before + " -> " + SafeCurrentTls());
             }
         }
 
-        // TLS のハンドシェイク失敗を受けて、次の段へ進める。
-        // 進めた場合は true(呼び出し側は同じ要求を 1 度だけ再試行する)。
+        static string SafeCurrentTls()
+        {
+            try
+            {
+                SecurityProtocolType p = ServicePointManager.SecurityProtocol;
+                return p.ToString() + "(" + (int)p + ")";
+            }
+            catch { return "不明"; }
+        }
+
+        // 現在の TLS 設定(エラー表示用)
+        public static string CurrentTls { get { return SafeCurrentTls(); } }
+
+        // TLS 1.2 の適用に成功したか
+        public static bool TlsApplied { get { lock (tlsLock) { return tlsApplied; } } }
+
+        // TLS を再設定できるか(呼び出し側は同じ要求を 1 度だけ再試行する)。
+        //
+        // Tls12 固定なので「上げる段」は無い。ただし要求前に ApplyTls() が
+        // 呼ばれていない可能性があるため、未適用なら 1 度だけ再試行を許す。
         public static bool EscalateTls()
         {
             lock (tlsLock)
             {
-                // 第 0 段(SystemDefault が使える場合のみ) → 第 1 段(Tls12)。
-                // 第 1 段で失敗したら、それ以上は設定を変えても改善しない
-                // (SystemDefault は .NET 4.7 未満で無効、Tls13 は Mono で無効)。
-                if (tlsStage < 1)
-                {
-                    tlsStage = 1;
-                    return true;
-                }
-                return false;
+                if (tlsApplied) return false;   // すでに適用済みなら再試行しない
+                ApplyTls();
+                return true;
             }
         }
 
@@ -1026,6 +1058,22 @@ namespace Tau
             request.SendChunked = false;
             request.AllowReadStreamBuffering = false;
             request.AllowWriteStreamBuffering = true;
+
+            if (DebugOn)
+            {
+                Dbg("--- リクエスト設定 ---");
+                Dbg("  URL      : " + cfg.ApiBaseUrl);
+                Dbg("  Model    : " + cfg.Model);
+                Dbg("  TLS      : " + CurrentTls);
+                Dbg("  Proxy    : " + (request.Proxy == null ? "null(直接接続)"
+                    : request.Proxy.GetProxy(new Uri(cfg.ApiBaseUrl)).ToString()));
+                Dbg("  HTTP     : " + request.ProtocolVersion);
+                Dbg("  Expect100: " + request.ServicePoint.Expect100Continue);
+                Dbg("  KeepAlive: " + request.KeepAlive);
+                Dbg("  Timeout  : " + request.Timeout + "ms / R/W " + request.ReadWriteTimeout + "ms");
+                Dbg("  Body     : " + payload.Length + " bytes");
+                Dbg("----------------------");
+            }
         }
 
         // WebException の内容を、原因が分かる形に整形する
@@ -1203,6 +1251,10 @@ namespace Tau
             }
             catch (WebException wex)
             {
+                Dbg("WebException: status=" + wex.Status);
+                Dbg("  連鎖: " + ExceptionChain(wex));
+                Dbg("  IsTlsFailure=" + IsTlsFailure(wex) + " / EscalateTls=" + EscalateTls());
+
                 if (IsTlsFailure(wex) && EscalateTls())
                 {
                     ConsoleUi.Info("TLS の設定を変更して再試行します…");
@@ -1227,12 +1279,24 @@ namespace Tau
             current = request;
             try
             {
+                Dbg("接続開始: " + cfg.ApiBaseUrl);
                 using (Stream s = request.GetRequestStream())
                     s.Write(payload, 0, payload.Length);
+                Dbg("送信完了(" + payload.Length + " bytes)、応答待ち…");
 
                 using (HttpWebResponse resp = (HttpWebResponse)request.GetResponse())
                 using (StreamReader sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
+                    if (DebugOn)
+                    {
+                        Dbg("応答受信: HTTP " + (int)resp.StatusCode + " " + resp.StatusDescription);
+                        Dbg("  ContentType  : " + resp.ContentType);
+                        Dbg("  ContentLength: " + resp.ContentLength);
+                        Dbg("  TransferEnc  : " + resp.Headers["Transfer-Encoding"]);
+                        Dbg("  Protocol     : " + resp.ProtocolVersion);
+                        Dbg("  Server       : " + resp.Server);
+                    }
+
                     string ctype = (resp.ContentType == null) ? "" : resp.ContentType;
                     if (ctype.IndexOf("event-stream", StringComparison.OrdinalIgnoreCase) < 0)
                     {
@@ -1243,9 +1307,14 @@ namespace Tau
                     else
                     {
                         bool sawDone = false;   // [DONE] を受け取ったか(正常終了の目印)
+                        int lineNo = 0;
                         string line;
                         while ((line = sr.ReadLine()) != null)
                         {
+                            lineNo++;
+                            if (DebugOn && lineNo <= 5)
+                                Dbg("SSE[" + lineNo + "]: "
+                                    + (line.Length > 160 ? line.Substring(0, 160) + "..." : line));
                             if (line.Length == 0) continue;
                             if (!line.StartsWith("data:")) continue;
                             string data = line.Substring(5).Trim();
@@ -1310,6 +1379,9 @@ namespace Tau
                                 }
                             }
                         }
+
+                        Dbg("SSE 読み取り終了: 行数=" + lineNo + " sawDone=" + sawDone
+                            + " contentLen=" + content.Length);
 
                         // [DONE] を受け取らずにストリームが終わった場合は、
                         // 応答が途中で切れている(通信断・サーバ側のタイムアウト等)。
@@ -2624,7 +2696,7 @@ namespace Tau
                     ConsoleUi.Dim("  TLS のハンドシェイクに失敗しました。\n");
                     ConsoleUi.Dim("  ・接続先: " + cfg.ApiBaseUrl + "\n");
                     ConsoleUi.Dim("  ・tau は TLS 1.2 を指定して接続を試みました"
-                        + (LlmClient.SystemDefaultUsable ? "(SystemDefault も試行済み)" : "") + "。\n");
+                        + (LlmClient.TlsApplied ? "(適用済み)" : "(適用できませんでした)") + "。\n");
                     ConsoleUi.Dim("  ・それでも失敗する場合は、次のいずれかが原因です。\n");
                     ConsoleUi.Dim("    1) OS 側で TLS 1.2 が無効になっている\n");
                     ConsoleUi.Dim("       (Windows の「インターネットオプション」→ 詳細設定 →\n");
@@ -2640,8 +2712,176 @@ namespace Tau
                     ConsoleUi.Dim("  ・切り分け: PowerShell で次を実行し、接続できるか確認できます。\n");
                     ConsoleUi.Dim("       [Net.ServicePointManager]::SecurityProtocol = 'Tls12'\n");
                     ConsoleUi.Dim("       Invoke-WebRequest " + cfg.ApiBaseUrl + " -Method Head\n");
+                    ConsoleUi.Dim("  ・詳細: 環境変数 TAU_DEBUG=1 を設定して再実行すると、\n");
+                    ConsoleUi.Dim("    実際の TLS 設定と例外の連鎖が表示されます。\n");
+                }
+
+                // TAU_DEBUG=1 のときは、例外の連鎖と環境情報を必ず出す
+                if (LlmClient.DebugOn)
+                {
+                    ConsoleUi.Dim("  --- debug ---\n");
+                    ConsoleUi.Dim("  環境: " + LlmClient.DescribeEnvironment() + "\n");
+                    ConsoleUi.Dim("  TLS : " + LlmClient.CurrentTls + "\n");
+                    ConsoleUi.Dim("  例外: " + LlmClient.ExceptionChain(ex).Replace("\n", "\n        ") + "\n");
+                    ConsoleUi.Dim("  ----\n");
                 }
             }
+        }
+    }
+}
+
+namespace Tau
+{
+    // =======================================================================
+    //  接続診断 (--diag)
+    //
+    //  実際に接続を試し、どこで失敗しているかを切り分ける。
+    //   - 環境情報(.NET / Mono / OS / 既定の TLS)
+    //   - TLS の各バージョンでの接続可否
+    //   - プロキシ設定
+    //   - HTTP 応答の内容
+    // =======================================================================
+    static class Diagnostics
+    {
+        public static void Run(Config cfg)
+        {
+            Console.WriteLine();
+            ConsoleUi.Bold("tau --diag  接続診断");
+            Console.WriteLine();
+
+            Console.WriteLine("  [環境]");
+            Console.WriteLine("    " + LlmClient.DescribeEnvironment());
+            Console.WriteLine();
+
+            Console.WriteLine("  [設定]");
+            Console.WriteLine("    URL     : " + cfg.ApiBaseUrl);
+            Console.WriteLine("    Model   : " + cfg.Model);
+            Console.WriteLine("    Proxy   : " + (cfg.ProxyUrl != null && cfg.ProxyUrl.Trim().Length > 0
+                                ? cfg.ProxyUrl : "(なし)"));
+            Console.WriteLine("    SysProxy: " + (cfg.UseSystemProxy ? "有効" : "無効(直接接続)"));
+            Console.WriteLine("    API Key : " + (cfg.SecretKey.Length > 0 ? "設定済み" : "未設定"));
+            Console.WriteLine("    Config  : " + cfg.ConfigPath);
+            Console.WriteLine();
+
+            Uri uri = null;
+            try { uri = new Uri(cfg.ApiBaseUrl); }
+            catch (Exception ex)
+            {
+                ConsoleUi.Danger("  URL が不正です: " + ex.Message + "\n");
+                return;
+            }
+
+            Console.WriteLine("  [接続先]");
+            Console.WriteLine("    Host : " + uri.Host);
+            Console.WriteLine("    Port : " + uri.Port);
+            Console.WriteLine("    Path : " + uri.AbsolutePath);
+            try
+            {
+                System.Net.IPAddress[] ips = System.Net.Dns.GetHostAddresses(uri.Host);
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < ips.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(ips[i]);
+                }
+                Console.WriteLine("    DNS  : " + sb);
+            }
+            catch (Exception ex)
+            {
+                ConsoleUi.Danger("    DNS  : 解決できません: " + ex.Message + "\n");
+            }
+            Console.WriteLine();
+
+            // --- TLS の各バージョンを試す ---
+            Console.WriteLine("  [TLS の接続試験]");
+            string[] names = { "SystemDefault", "Tls12", "Tls11", "Tls", "Tls13" };
+            SecurityProtocolType original = ServicePointManager.SecurityProtocol;
+            foreach (string n in names)
+            {
+                object v = null;
+                try { v = Enum.Parse(typeof(SecurityProtocolType), n); }
+                catch { }
+                if (v == null)
+                {
+                    Console.WriteLine("    " + n.PadRight(14) + ": (この .NET には無い)");
+                    continue;
+                }
+                try
+                {
+                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)v;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("    " + n.PadRight(14) + ": 設定不可 (" + ex.Message + ")");
+                    continue;
+                }
+
+                string result;
+                try
+                {
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(uri);
+                    req.Method = "HEAD";
+                    req.Timeout = 15000;
+                    req.AllowAutoRedirect = false;
+                    ProxyHelper.Apply(req, cfg);
+                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                        result = "OK  HTTP " + (int)resp.StatusCode + " (" + resp.ProtocolVersion + ")";
+                }
+                catch (WebException wex)
+                {
+                    result = "NG  " + wex.Status + ": " + FirstLine(wex.Message);
+                    if (wex.InnerException != null)
+                        result += "  <- " + FirstLine(wex.InnerException.Message);
+                }
+                catch (Exception ex)
+                {
+                    result = "NG  " + ex.GetType().Name + ": " + FirstLine(ex.Message);
+                }
+                Console.WriteLine("    " + n.PadRight(14) + ": " + result);
+            }
+            try { ServicePointManager.SecurityProtocol = original; } catch { }
+            Console.WriteLine();
+
+            // --- 実際の API 呼び出し ---
+            Console.WriteLine("  [API 呼び出し試験]");
+            LlmClient.ApplyTls();
+            Console.WriteLine("    使用 TLS : " + LlmClient.CurrentTls);
+
+            List<object> msgs = new List<object>();
+            Dictionary<string, object> m = new Dictionary<string, object>();
+            m["role"] = "user";
+            m["content"] = "ping";
+            msgs.Add(m);
+
+            try
+            {
+                LlmResp resp = LlmClient.CallOnce(cfg, msgs, false);
+                Console.WriteLine("    結果     : OK");
+                Console.WriteLine("    応答     : " + FirstLine(resp.Content));
+            }
+            catch (WebException wex)
+            {
+                ConsoleUi.Danger("    結果     : NG " + wex.Status + "\n");
+                Console.WriteLine("    詳細     : " + LlmClient.DescribeWebException(wex));
+                Console.WriteLine("    連鎖     : " + LlmClient.ExceptionChain(wex));
+            }
+            catch (Exception ex)
+            {
+                ConsoleUi.Danger("    結果     : NG " + ex.GetType().Name + "\n");
+                Console.WriteLine("    詳細     : " + ex.Message);
+            }
+            Console.WriteLine();
+
+            ConsoleUi.Dim("  上記で OK が出る TLS が使えれば、tau の接続は成立します。\n");
+            ConsoleUi.Dim("  すべて NG の場合は OS / .NET / プロキシ側の TLS 設定を確認してください。\n");
+        }
+
+        static string FirstLine(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            int i = s.IndexOf('\n');
+            if (i > 0) s = s.Substring(0, i);
+            return (s.Length > 200) ? s.Substring(0, 200) + "..." : s;
         }
     }
 }

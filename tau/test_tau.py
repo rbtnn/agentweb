@@ -336,14 +336,10 @@ def main():
         ok("TLS バージョンを設定する処理(ApplyTls)があります")
     else:
         bad("ApplyTls がありません")
-    if "CanUseSystemDefault" in tls_src:
-        ok("SystemDefault が使えるかを実際に確かめています")
+    if "SecurityProtocolType.Tls12" in tls_src and "SystemDefault" not in tls_src.split("public static void ApplyTls")[1].split("public static")[0]:
+        ok("ApplyTls は SystemDefault を使わず Tls12 に固定しています")
     else:
-        bad("SystemDefault の可否判定がありません")
-    if "systemDefaultOk" in tls_src:
-        ok("SystemDefault の可否をキャッシュしています")
-    else:
-        bad("SystemDefault の可否キャッシュがありません")
+        bad("ApplyTls が SystemDefault を使っています")
     if "SecurityProtocolType.Tls12" in tls_src:
         ok("第 2 段で TLS 1.2 を明示するフォールバックがあります")
     else:
@@ -362,18 +358,10 @@ def main():
         ok("TLS 1.3 を OR で混ぜていません(Tls12 単独指定)")
     else:
         bad("Tls12 に Tls13 を混ぜています(無効なプロトコル指定になる)")
-    if "tlsStage < 1" in tls_src:
-        ok("エスカレーションが 2 段階(無限再試行しない)")
+    if "if (tlsApplied) return false;" in tls_src:
+        ok("TLS 適用済みなら再試行しない(無限再試行しない)")
     else:
-        bad("エスカレーションの段数制御がありません")
-    # SystemDefault(値0) は .NET Framework 4.7 未満で無効。
-    # 無条件に設定すると SslProtocolType エラーになるため、
-    # 可否を確かめてから使う必要がある。
-    if "ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;\n                systemDefaultOk = 1;" in tls_src \
-       or "systemDefaultOk = 1;" in tls_src:
-        ok("SystemDefault を実際に設定して可否を判定しています")
-    else:
-        bad("SystemDefault の可否を実際に試していません")
+        bad("再試行の段数制御がありません")
     # 実測された症状: Status=ReceiveFailure + 内部例外
     # 「指定された値は 'SslProtocolType' 列挙で有効ではありません」
     # も TLS の設定不備として再試行対象にする必要がある。
@@ -396,12 +384,41 @@ def main():
     else:
         bad("TLS 設定の適用箇所が足りません: %d" % tls_src.count("ApplyTls()"))
 
+    # ---- 7b. デバッグ機能 ----
+    if "--diag" in tls_src and "class Diagnostics" in tls_src:
+        ok("接続診断(--diag)が実装されています")
+    else:
+        bad("--diag が実装されていません")
+    if "TAU_DEBUG" in tls_src and "public static void Dbg" in tls_src:
+        ok("デバッグ出力(TAU_DEBUG / --debug)が実装されています")
+    else:
+        bad("デバッグ出力が実装されていません")
+    if "ExceptionChain" in tls_src:
+        ok("例外の連鎖を表示できます")
+    else:
+        bad("例外の連鎖表示がありません")
+
     # ---- 8. --help ----
     out = run_tau("", args=["--help"])
     if "/model" in out and "/sessions" in out:
         ok("--help にコマンド一覧が表示されます")
     else:
         bad("--help の内容が想定と違います")
+    if "--diag" in out and "--debug" in out:
+        ok("--help に --diag / --debug が表示されます")
+    else:
+        bad("--help に診断オプションがありません")
+
+    # ---- 9. --diag が動作する ----
+    out = run_tau("", args=["--diag"], timeout=120)
+    if "接続診断" in out and "TLS の接続試験" in out:
+        ok("--diag が接続診断を実行します")
+    else:
+        bad("--diag が動作しません: " + out[-400:])
+    if "runtime=" in out and "SecurityProtocol=" in out:
+        ok("--diag が環境情報を表示します")
+    else:
+        bad("--diag の環境情報がありません")
 
     srv.shutdown(); srv.server_close()
     shutil.rmtree(work, ignore_errors=True)
