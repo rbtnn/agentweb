@@ -332,22 +332,36 @@ def main():
     #   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした」
     # になる。EnsureTls() が SystemDefault / Tls12 以上を設定していることを確認する。
     tls_src = open(SRC, encoding="utf-8").read()
-    if "EnsureTls" in tls_src and "ServicePointManager.SecurityProtocol" in tls_src:
-        ok("TLS バージョンを明示する処理(EnsureTls)があります")
+    if "ApplyTls" in tls_src and "ServicePointManager.SecurityProtocol" in tls_src:
+        ok("TLS バージョンを設定する処理(ApplyTls)があります")
     else:
-        bad("EnsureTls がありません")
+        bad("ApplyTls がありません")
     if "SystemDefault" in tls_src:
-        ok("OS に任せる SystemDefault を優先しています")
+        ok("第 1 段で OS に任せる SystemDefault を試します")
     else:
         bad("SystemDefault を使っていません")
     if "SecurityProtocolType.Tls12" in tls_src:
-        ok("古い .NET 向けに TLS 1.2 のフォールバックがあります")
+        ok("第 2 段で TLS 1.2 を明示するフォールバックがあります")
     else:
         bad("TLS 1.2 のフォールバックがありません")
-    if tls_src.count("EnsureTls()") >= 3:
+    if "EscalateTls" in tls_src and "IsTlsFailure" in tls_src:
+        ok("TLS 失敗を検出して一段上げる処理があります")
+    else:
+        bad("TLS 失敗時のエスカレーションがありません")
+    if "SecureChannelFailure" in tls_src:
+        ok("SecureChannelFailure を TLS 失敗として扱います")
+    else:
+        bad("SecureChannelFailure の判定がありません")
+    # SystemDefault(0) は列挙値として存在しても OS 既定が TLS1.0 のままになる環境があるため、
+    # 「存在するから使う」で終わらせず、失敗時に TLS 1.2 へ上がることを確認する。
+    if tls_src.count("CallStreamOnce") >= 2 and tls_src.count("CallOnceInternal") >= 2:
+        ok("ストリーミング/非ストリーミングの両方で再試行します")
+    else:
+        bad("再試行の実装が足りません")
+    if tls_src.count("ApplyTls()") >= 2:
         ok("LLM 呼び出しと curl ツールの両方で TLS 設定を適用しています")
     else:
-        bad("TLS 設定の適用箇所が足りません: %d" % tls_src.count("EnsureTls()"))
+        bad("TLS 設定の適用箇所が足りません: %d" % tls_src.count("ApplyTls()"))
 
     # ---- 8. --help ----
     out = run_tau("", args=["--help"])

@@ -855,55 +855,97 @@ namespace Tau
         // 処理中のリクエスト(Ctrl+C で中断するため)
         static volatile HttpWebRequest current;
 
-        static bool tlsConfigured;
+        // TLS の設定段階。
+        //   0 = SystemDefault (OS に任せる) を試す
+        //   1 = 明示的に TLS 1.2 以上を指定する
+        static int tlsStage;
+        static readonly object tlsLock = new object();
 
         // TLS のバージョンを設定する。
         //
-        // 何もしないと、ターゲットフレームワークが 4.7 未満のアプリでは
+        // 何もしないと、.NET Framework 4.6.1 以前をターゲットにしたアプリでは
         // 既定が Ssl3|Tls (TLS 1.0) 相当になり、TLS 1.2 以上を要求する API
         // (OpenAI 系・DeepSeek 系・多くのプロキシ) で
-        //   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした」
+        //   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした
+        //    (status=SecureChannelFailure)」
         // になる。
         //
-        // 対処の優先順位:
-        //   1. SecurityProtocolType.SystemDefault が使えるなら、それを使う。
-        //      OS に最適なバージョン(Windows 10 なら TLS 1.2、11 なら 1.3)を
-        //      選ばせられるため、これが最も将来性が高い。
-        //   2. 無い場合(古い .NET)は Tls12 を明示する。
-        //      Tls13 が定義されていれば併せて有効にする。
-        public static void EnsureTls()
+        // SystemDefault は列挙値としては存在するが、ターゲットフレームワークが
+        // 4.7 未満だと OS 既定が使われず TLS 1.0 のままになることがある。
+        // そのため「SystemDefault で失敗したら TLS 1.2 を明示して再試行する」
+        // という二段構えにする。
+        public static void ApplyTls()
         {
-            if (tlsConfigured) return;
-            tlsConfigured = true;
-
-            // 1. SystemDefault (OS に任せる)
-            try
+            lock (tlsLock)
             {
-                object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
-                if (sd != null)
+                if (tlsStage == 0)
                 {
-                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
-                    return;
+                    // 第 1 段: OS に任せる(Windows 10 なら TLS 1.2、11 なら 1.3)
+                    try
+                    {
+                        object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
+                        if (sd != null)
+                        {
+                            ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
+                            return;
+                        }
+                    }
+                    catch { }
+                    tlsStage = 1;   // SystemDefault が無い環境はすぐ第 2 段へ
                 }
-            }
-            catch { }
 
-            // 2. 明示的に TLS 1.2 以上を有効にする
-            try
-            {
-                SecurityProtocolType proto = SecurityProtocolType.Tls12;
-
-                // Tls13 は .NET Framework 4.8 以降にしか無いため、名前で確認する
+                // 第 2 段: TLS 1.2 以上を明示する
                 try
                 {
-                    object t13 = Enum.Parse(typeof(SecurityProtocolType), "Tls13");
-                    if (t13 != null) proto |= (SecurityProtocolType)t13;
+                    SecurityProtocolType proto = SecurityProtocolType.Tls12;
+                    // Tls13 は .NET Framework 4.8 以降にしか無いため、名前で確認する
+                    try
+                    {
+                        object t13 = Enum.Parse(typeof(SecurityProtocolType), "Tls13");
+                        if (t13 != null) proto |= (SecurityProtocolType)t13;
+                    }
+                    catch { }
+                    ServicePointManager.SecurityProtocol = proto;
                 }
                 catch { }
-
-                ServicePointManager.SecurityProtocol = proto;
             }
-            catch { }
+        }
+
+        // TLS のハンドシェイク失敗を受けて、次の段へ進める。
+        // 進めた場合は true(呼び出し側は同じ要求を 1 度だけ再試行する)。
+        public static bool EscalateTls()
+        {
+            lock (tlsLock)
+            {
+                if (tlsStage == 0)
+                {
+                    tlsStage = 1;      // 次は TLS 1.2 を明示する
+                    return true;
+                }
+                return false;          // すでに TLS 1.2 を指定済みなら諦める
+            }
+        }
+
+        // TLS ハンドシェイク失敗かどうか
+        public static bool IsTlsFailure(WebException wex)
+        {
+            if (wex == null) return false;
+            if (wex.Status == WebExceptionStatus.SecureChannelFailure) return true;
+            if (wex.Status == WebExceptionStatus.TrustFailure) return false;  // 証明書の問題
+            // 内部例外に TLS/SslStream 系が含まれていればハンドシェイク失敗とみなす
+            Exception e = wex.InnerException;
+            int depth = 0;
+            while (e != null && depth < 4)
+            {
+                string n = e.GetType().FullName ?? "";
+                if (n.IndexOf("Authentication", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    n.IndexOf("SslStream", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    n.IndexOf("Tls", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+                e = e.InnerException;
+                depth++;
+            }
+            return false;
         }
 
         public static void Cancel()
@@ -917,7 +959,7 @@ namespace Tau
 
         static void Setup(HttpWebRequest request, Config cfg, byte[] payload)
         {
-            EnsureTls();
+            ApplyTls();
             ProxyHelper.Apply(request, cfg);
             request.Method = "POST";
             request.ContentType = "application/json";
@@ -1017,6 +1059,20 @@ namespace Tau
         // ---- 非ストリーミング呼び出し(要約など) ----
         public static LlmResp CallOnce(Config cfg, List<object> messages, bool useTools)
         {
+            try
+            {
+                return CallOnceInternal(cfg, messages, useTools);
+            }
+            catch (WebException wex)
+            {
+                if (IsTlsFailure(wex) && EscalateTls())
+                    return CallOnceInternal(cfg, messages, useTools);
+                throw;
+            }
+        }
+
+        static LlmResp CallOnceInternal(Config cfg, List<object> messages, bool useTools)
+        {
             Dictionary<string, object> body = BuildBody(cfg, messages, useTools, false);
             byte[] payload = Encoding.UTF8.GetBytes(Json.ToString(body));
 
@@ -1034,9 +1090,9 @@ namespace Tau
                 using (StreamReader sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                     responseBody = sr.ReadToEnd();
             }
-            catch (WebException wex)
+            catch (WebException)
             {
-                throw new Exception("LLM API エラー: " + DescribeWebException(wex));
+                throw;   // TLS 失敗の再試行をラッパーが判断できるよう、そのまま投げる
             }
             finally
             {
@@ -1093,8 +1149,28 @@ namespace Tau
             public StringBuilder Args = new StringBuilder();
         }
 
+        // TLS ハンドシェイクに失敗したら、設定を一段上げて 1 度だけ再試行する。
+        // (SystemDefault が効かない環境では TLS 1.2 を明示すると通ることが多い)
         public static LlmResp CallStream(Config cfg, List<object> messages, bool useTools,
                                          Action<string> contentCb, Action<string> reasoningCb)
+        {
+            try
+            {
+                return CallStreamOnce(cfg, messages, useTools, contentCb, reasoningCb);
+            }
+            catch (WebException wex)
+            {
+                if (IsTlsFailure(wex) && EscalateTls())
+                {
+                    ConsoleUi.Info("TLS の設定を変更して再試行します…");
+                    return CallStreamOnce(cfg, messages, useTools, contentCb, reasoningCb);
+                }
+                throw;
+            }
+        }
+
+        static LlmResp CallStreamOnce(Config cfg, List<object> messages, bool useTools,
+                                      Action<string> contentCb, Action<string> reasoningCb)
         {
             Dictionary<string, object> body = BuildBody(cfg, messages, useTools, true);
             byte[] payload = Encoding.UTF8.GetBytes(Json.ToString(body));
@@ -1207,7 +1283,7 @@ namespace Tau
             catch (WebException wex)
             {
                 if (wex.Status == WebExceptionStatus.RequestCanceled) throw new LlmCancelledException();
-                throw new Exception("LLM API(stream)エラー: " + DescribeWebException(wex));
+                throw;   // TLS 失敗の再試行をラッパーが判断できるよう、そのまま投げる
             }
             catch (IOException iex)
             {
@@ -1633,7 +1709,7 @@ namespace Tau
             try
             {
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url.Trim());
-                LlmClient.EnsureTls();   // HTTPS 先でも TLS 1.2 以上を使えるようにする
+                LlmClient.ApplyTls();   // HTTPS 先でも TLS 1.2 以上を使えるようにする
                 ProxyHelper.Apply(request, cfg);
                 request.Method = method;
                 request.Timeout = cfg.ToolTimeoutSec * 1000;
@@ -2493,7 +2569,22 @@ namespace Tau
             catch (Exception ex)
             {
                 Console.WriteLine();
-                ConsoleUi.Danger("⚠ エラー: " + ex.Message + "\n");
+                string msg;
+                WebException wex = ex as WebException;
+                if (wex != null) msg = LlmClient.DescribeWebException(wex);
+                else msg = ex.Message;
+                ConsoleUi.Danger("⚠ エラー: " + msg + "\n");
+
+                // TLS ハンドシェイク失敗は、利用者が対処しやすいよう補足を出す
+                if (wex != null && LlmClient.IsTlsFailure(wex))
+                {
+                    ConsoleUi.Dim("  TLS のハンドシェイクに失敗しました。\n");
+                    ConsoleUi.Dim("  ・接続先: " + cfg.ApiBaseUrl + "\n");
+                    ConsoleUi.Dim("  ・.NET Framework 4.6.1 以前をターゲットにしていると、\n");
+                    ConsoleUi.Dim("    既定が TLS 1.0 のままになり、TLS 1.2 以上を要求する API に\n");
+                    ConsoleUi.Dim("    接続できません。tau は TLS 1.2 を明示して再試行済みです。\n");
+                    ConsoleUi.Dim("  ・プロキシ経由の場合は、プロキシ側の TLS 対応も確認してください。\n");
+                }
             }
         }
     }
