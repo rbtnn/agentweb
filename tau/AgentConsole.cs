@@ -63,7 +63,7 @@ namespace Tau
             Console.WriteLine("tau - コンソール上で動く AI エージェント");
             Console.WriteLine();
             Console.WriteLine("使用法: tau.exe [オプション]");
-            Console.WriteLine("  --config <path>    設定ファイル(agentweb.json)のパス");
+            Console.WriteLine("  --config <path>    設定ファイル(tau.json)のパス");
             Console.WriteLine("  --session <id>     既存セッションを開いて続きから対話する");
             Console.WriteLine("  --list             保存済みセッションの一覧を表示して終了");
             Console.WriteLine("  --diag             接続診断(TLS/HTTP)を実行して終了");
@@ -75,6 +75,9 @@ namespace Tau
             Console.WriteLine("  /new         新しいセッションを開始");
             Console.WriteLine("  /sessions    保存済みセッションの一覧");
             Console.WriteLine("  /open <id>   指定したセッションを開く");
+            Console.WriteLine("  /config      現在の設定を表示");
+            Console.WriteLine("  /config edit 対話形式で設定を変更");
+            Console.WriteLine("  /set <k> <v> 設定を 1 項目だけ変更 (例: /set model gpt-4o)");
             Console.WriteLine("  /model [名]  モデルの表示・切り替え");
             Console.WriteLine("  /tools       ツール実行の on/off を切り替え");
             Console.WriteLine("  /clear       画面を消す");
@@ -83,7 +86,7 @@ namespace Tau
 
         static void ListSessions(string configPath)
         {
-            // 設定を読み込んでおく(agentweb と同じ設定ファイルを参照していることを確認するため)
+            // 設定を読み込んでおく(保存先ディレクトリの作成も兼ねる)
             new Config(configPath);
             SessionStore store = new SessionStore();
             List<object> list = store.List();
@@ -116,9 +119,9 @@ namespace Tau
     // =======================================================================
     //  設定
     //
-    //  agentweb と同じファイルを参照する(独自の設定は持たない)。
-    //  優先度: 環境変数 < agentweb.json
-    //  保存先: %APPDATA%\agentweb\agentweb.json (Linux では ~/.config/agentweb/agentweb.json)
+    //  agentweb とは独立した設定ファイルを持つ。
+    //  優先度: 環境変数 < tau.json
+    //  保存先: %APPDATA%\tau\tau.json (Linux では ~/.config/tau/tau.json)
     // =======================================================================
     class Config
     {
@@ -178,30 +181,36 @@ namespace Tau
 
             ConfigPath = (configPathArg != null && configPathArg.Trim().Length > 0)
                 ? configPathArg.Trim()
-                : Env("AGENTWEB_CONFIG", "");
+                : Env("TAU_CONFIG", "");
 
             ApplyConfigFile();
         }
 
         // ---------------- 設定ファイル ----------------
 
-        // agentweb と同じ設定ファイルを参照する
+        // tau 独自の設定ファイル
         public static string DefaultConfigPath()
         {
-            return Path.Combine(AppDataDir(), "agentweb.json");
+            return Path.Combine(TauDataDir(), "tau.json");
         }
 
-        // agentweb と同じデータディレクトリ(セッションの保存先)
-        public static string AppDataDir()
+        // tau 独自のデータディレクトリ(設定とセッションの保存先)。
+        // agentweb とは共有しない。
+        public static string TauDataDir()
+        {
+            return AppDirUnder("tau");
+        }
+
+        static string AppDirUnder(string name)
         {
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             if (string.IsNullOrEmpty(appData))
             {
                 string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                 if (string.IsNullOrEmpty(home)) home = ".";
-                return Path.Combine(home, ".config", "agentweb");
+                return Path.Combine(home, ".config", name);
             }
-            return Path.Combine(appData, "agentweb");
+            return Path.Combine(appData, name);
         }
 
         void ApplyConfigFile()
@@ -307,9 +316,8 @@ namespace Tau
 
         // 設定をファイルへ保存する(/model での切り替えを次回も維持するため)
         //
-        // agentweb と同じ設定ファイルを共有しているので、tau が知らないキー
-        // (port / theme / bindPath / openBrowserOnStart など agentweb 専用の設定)を
-        // 失わないよう、既存ファイルの内容を読み込んでから上書きする。
+        // 手で追記した項目などを失わないよう、既存ファイルの内容を読み込んでから
+        // 上書きする(tau が扱わないキーはそのまま引き継ぐ)。
         public void Save()
         {
             try
@@ -640,12 +648,12 @@ namespace Tau
     // =======================================================================
     //  セッションの永続化
     //
-    //  agentweb とまったく同じ場所・同じ形式で読み書きする。
-    //    %APPDATA%\agentweb\sessions\<id>.json
-    //    %APPDATA%\agentweb\sessions\_state.json  (最後に開いたセッション)
+    //  セッションは agentweb とは別に、tau 独自の場所へ保存する。
+    //    %APPDATA%\tau\sessions\<id>.json
+    //    %APPDATA%\tau\sessions\_state.json  (最後に開いたセッション)
     //
-    //  これにより agentweb で作った会話を tau で開いて続きから対話でき、
-    //  tau で作った会話を agentweb で開くこともできる。
+    //  ファイル形式は agentweb と同じ(互換)だが、保存先は共有しない。
+    //  設定も tau 独自の tau.json を使う。
     // =======================================================================
     class SessionStore
     {
@@ -653,7 +661,9 @@ namespace Tau
 
         public SessionStore()
         {
-            sessionsDir = Path.Combine(Config.AppDataDir(), "sessions");
+            // セッションは agentweb と共有せず、tau 独自の場所に保存する。
+            //   %APPDATA%\tau\sessions\<id>.json
+            sessionsDir = Path.Combine(Config.TauDataDir(), "sessions");
             try { Directory.CreateDirectory(sessionsDir); }
             catch { }
         }
@@ -767,7 +777,7 @@ namespace Tau
             }
         }
 
-        // ---------------- 最後に開いていたセッション (agentweb と共有) ----------------
+        // ---------------- 最後に開いていたセッション (tau 独自) ----------------
 
         string StateFile()
         {
@@ -2634,6 +2644,65 @@ namespace Tau
                     ConsoleUi.Info("ツール実行: " + (cfg.AllowTools ? "on" : "off"));
                     return true;
 
+                case "/config":
+                case "/settings":
+                    {
+                        string sub = arg.Trim().ToLowerInvariant();
+                        if (sub == "edit" || sub == "e")
+                        {
+                            Settings.Edit(cfg);
+                        }
+                        else if (sub.Length == 0)
+                        {
+                            Settings.Show(cfg);
+                        }
+                        else
+                        {
+                            ConsoleUi.Danger("使い方: /config [edit]\n");
+                        }
+                    }
+                    return true;
+
+                case "/set":
+                    {
+                        if (arg.Length == 0)
+                        {
+                            ConsoleUi.Dim("  使い方: /set <key> <value>\n");
+                            ConsoleUi.Dim("  例: /set model gpt-4o\n");
+                            ConsoleUi.Dim("      /set allowTools false\n");
+                            ConsoleUi.Dim("      /set contextWindow 128000\n");
+                            ConsoleUi.Dim("  key 一覧は /config で確認できます\n");
+                            return true;
+                        }
+                        // "<key> <value>" を分割する(値に空白を含められるようにする)
+                        int sp = arg.IndexOf(' ');
+                        string key = (sp < 0) ? arg : arg.Substring(0, sp);
+                        string value = (sp < 0) ? "" : arg.Substring(sp + 1);
+
+                        Settings.Field f = Settings.Find(key);
+                        if (f == null)
+                        {
+                            ConsoleUi.Danger("不明な設定項目です: " + key + "\n");
+                            ConsoleUi.Dim("  /config で項目一覧を表示します\n");
+                            return true;
+                        }
+                        if (value.Trim().Length == 0 && f.Kind != "string" && f.Kind != "secret")
+                        {
+                            ConsoleUi.Dim("  現在値: " + Settings.Display(cfg, f) + "\n");
+                            ConsoleUi.Dim("  使い方: /set " + f.Key + " <value>\n");
+                            return true;
+                        }
+                        if (!Settings.Apply(cfg, f, value))
+                        {
+                            ConsoleUi.Danger("値が不正です: " + value + "\n");
+                            ConsoleUi.Dim("  現在値: " + Settings.Display(cfg, f) + "\n");
+                            return true;
+                        }
+                        cfg.Save();
+                        ConsoleUi.Info(f.Key + " = " + Settings.Display(cfg, f) + "  に変更しました");
+                    }
+                    return true;
+
                 default:
                     ConsoleUi.Danger("不明なコマンドです: " + cmd + "\n");
                     ConsoleUi.Dim("  /help でコマンド一覧を表示します\n");
@@ -2764,7 +2833,7 @@ namespace Tau
                     ConsoleUi.Dim("         SystemDefaultTlsVersions\n");
                     ConsoleUi.Dim("       (32bit 版は WOW6432Node 側にも同じ値を設定)\n");
                     ConsoleUi.Dim("    3) プロキシ経由の場合、プロキシ自体が TLS 1.2 に未対応\n");
-                    ConsoleUi.Dim("       (agentweb.json の proxyUrl / useSystemProxy を確認)\n");
+                    ConsoleUi.Dim("       (tau.json の proxyUrl / useSystemProxy を確認)\n");
                     ConsoleUi.Dim("  ・切り分け: PowerShell で次を実行し、接続できるか確認できます。\n");
                     ConsoleUi.Dim("       [Net.ServicePointManager]::SecurityProtocol = 'Tls12'\n");
                     ConsoleUi.Dim("       Invoke-WebRequest " + cfg.ApiBaseUrl + " -Method Head\n");
@@ -3009,6 +3078,274 @@ namespace Tau
             int i = s.IndexOf('\n');
             if (i > 0) s = s.Substring(0, i);
             return (s.Length > 200) ? s.Substring(0, 200) + "..." : s;
+        }
+    }
+}
+
+namespace Tau
+{
+    // =======================================================================
+    //  設定の編集 (プロンプトから)
+    //
+    //   /config            現在の設定を表示
+    //   /config edit       対話形式で 1 項目ずつ変更する
+    //   /set <key> <value> 1 項目だけ変更する
+    //
+    //  agentweb の設定画面に相当するものをコンソールで提供する。
+    // =======================================================================
+    static class Settings
+    {
+        // 編集できる項目の定義
+        public class Field
+        {
+            public string Key;        // 設定ファイルのキー
+            public string Label;      // 表示名
+            public string Kind;       // "string" / "int" / "bool" / "secret"
+            public string Help;       // 補足
+        }
+
+        public static readonly Field[] Fields = new Field[]
+        {
+            new Field { Key = "llmApiUrl", Label = "API URL", Kind = "string",
+                Help = "OpenAI 互換の /chat/completions の URL" },
+            new Field { Key = "llmApiKey", Label = "API Key", Kind = "secret",
+                Help = "API キー(表示時は伏せ字)" },
+            new Field { Key = "model", Label = "Model", Kind = "string",
+                Help = "使用するモデル名" },
+            new Field { Key = "models", Label = "Models", Kind = "list",
+                Help = "登録するモデル名の一覧(カンマ区切り)" },
+            new Field { Key = "allowTools", Label = "Allow Tools", Kind = "bool",
+                Help = "ツール実行の可否 (true/false)" },
+            new Field { Key = "emitReasoning", Label = "Emit Reasoning", Kind = "bool",
+                Help = "思考(reasoning)を表示するか (true/false)" },
+            new Field { Key = "contextWindow", Label = "Context Window", Kind = "int",
+                Help = "コンテキスト上限(推定トークン)" },
+            new Field { Key = "reserveTokens", Label = "Reserve Tokens", Kind = "int",
+                Help = "応答用に確保するトークン" },
+            new Field { Key = "keepRecentTokens", Label = "Keep Recent Tokens", Kind = "int",
+                Help = "要約せず残す直近トークン数" },
+            new Field { Key = "maxToolsPerTurn", Label = "Max Tools Per Turn", Kind = "int",
+                Help = "1 ターンで実行するツールの上限" },
+            new Field { Key = "toolTimeoutSec", Label = "Tool Timeout (sec)", Kind = "int",
+                Help = "ツール実行のタイムアウト(秒)" },
+            new Field { Key = "useSystemProxy", Label = "Use System Proxy", Kind = "bool",
+                Help = "OS のシステムプロキシを使うか (true/false)" },
+            new Field { Key = "proxyUrl", Label = "Proxy URL", Kind = "string",
+                Help = "社内プロキシの URL(空なら使わない)" },
+            new Field { Key = "proxyUser", Label = "Proxy User", Kind = "string",
+                Help = "プロキシ認証ユーザー" },
+            new Field { Key = "proxyPass", Label = "Proxy Pass", Kind = "secret",
+                Help = "プロキシ認証パスワード" },
+            new Field { Key = "systemPrompt", Label = "System Prompt", Kind = "text",
+                Help = "システムプロンプト(複数行可)" },
+        };
+
+        public static Field Find(string key)
+        {
+            if (key == null) return null;
+            string k = key.Trim().ToLowerInvariant();
+            for (int i = 0; i < Fields.Length; i++)
+                if (Fields[i].Key.ToLowerInvariant() == k) return Fields[i];
+            return null;
+        }
+
+        // 値を表示用の文字列にする
+        public static string Display(Config cfg, Field f)
+        {
+            Dictionary<string, object> m = cfg.ToDict();
+            if (!m.ContainsKey(f.Key)) return "";
+            object v = m[f.Key];
+
+            if (f.Kind == "secret")
+            {
+                string sv = Json.AsString(v);
+                if (sv.Length == 0) return "(未設定)";
+                if (sv.Length <= 8) return new string('*', sv.Length);
+                return sv.Substring(0, 3) + "..." + new string('*', Math.Min(8, sv.Length - 3));
+            }
+            if (f.Kind == "list")
+            {
+                List<object> arr = v as List<object>;
+                if (arr == null) return "";
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(Json.AsString(arr[i]));
+                }
+                return sb.ToString();
+            }
+            if (f.Kind == "text")
+            {
+                string t = Json.AsString(v);
+                if (t.Length > 80) t = t.Substring(0, 80) + "…";
+                return t.Replace("\n", " / ");
+            }
+            return Json.AsString(v);
+        }
+
+        // 値を適用する。成功なら true。
+        public static bool Apply(Config cfg, Field f, string raw)
+        {
+            if (raw == null) raw = "";
+            switch (f.Kind)
+            {
+                case "bool":
+                    {
+                        string s = raw.Trim().ToLowerInvariant();
+                        bool b;
+                        if (s == "true" || s == "1" || s == "on" || s == "yes" || s == "y") b = true;
+                        else if (s == "false" || s == "0" || s == "off" || s == "no" || s == "n") b = false;
+                        else return false;
+                        if (f.Key == "allowTools") cfg.AllowTools = b;
+                        else if (f.Key == "emitReasoning") cfg.EmitReasoning = b;
+                        else if (f.Key == "useSystemProxy") cfg.UseSystemProxy = b;
+                        return true;
+                    }
+                case "int":
+                    {
+                        int n;
+                        if (!int.TryParse(raw.Trim(), out n)) return false;
+                        if (n < 0) return false;
+                        if (f.Key == "contextWindow") cfg.ContextWindow = n;
+                        else if (f.Key == "reserveTokens") cfg.ReserveTokens = n;
+                        else if (f.Key == "keepRecentTokens") cfg.KeepRecentTokens = n;
+                        else if (f.Key == "maxToolsPerTurn") cfg.MaxToolsPerTurn = n;
+                        else if (f.Key == "toolTimeoutSec") cfg.ToolTimeoutSec = n;
+                        return true;
+                    }
+                case "list":
+                    {
+                        string[] items = raw.Split(new char[] { ',' });
+                        List<string> list = new List<string>();
+                        for (int i = 0; i < items.Length; i++)
+                        {
+                            string nm = (items[i] ?? "").Trim();
+                            if (nm.Length == 0) continue;
+                            if (!list.Contains(nm)) list.Add(nm);
+                        }
+                        if (list.Count == 0) return false;
+                        cfg.Models = list;
+                        // 選択中モデルが一覧に無ければ先頭へ
+                        if (!cfg.Models.Contains(cfg.Model)) cfg.Model = cfg.Models[0];
+                        return true;
+                    }
+                default:
+                    {
+                        string s = raw;
+                        if (f.Kind != "text") s = s.Trim();
+                        if (f.Key == "llmApiUrl") cfg.ApiBaseUrl = s;
+                        else if (f.Key == "llmApiKey") cfg.SecretKey = s;
+                        else if (f.Key == "model")
+                        {
+                            if (s.Length == 0) return false;
+                            if (!cfg.Models.Contains(s))
+                            {
+                                // 一覧に無いモデルは登録してから選ぶ
+                                cfg.Models.Add(s);
+                            }
+                            cfg.Model = s;
+                        }
+                        else if (f.Key == "proxyUrl") cfg.ProxyUrl = s;
+                        else if (f.Key == "proxyUser") cfg.ProxyUser = s;
+                        else if (f.Key == "proxyPass") cfg.ProxyPass = s;
+                        else if (f.Key == "systemPrompt")
+                        {
+                            if (s.Trim().Length == 0) return false;
+                            cfg.SystemPrompt = s;
+                        }
+                        return true;
+                    }
+            }
+        }
+
+        // 現在の設定を表示する
+        public static void Show(Config cfg)
+        {
+            Console.WriteLine("  設定ファイル: " + cfg.ConfigPath);
+            Console.WriteLine();
+            for (int i = 0; i < Fields.Length; i++)
+            {
+                Field f = Fields[i];
+                Console.WriteLine("    " + Pad(f.Key) + " = " + Display(cfg, f));
+            }
+            Console.WriteLine();
+            ConsoleUi.Dim("  変更: /set <key> <value>   または  /config edit\n");
+        }
+
+        static string Pad(string s)
+        {
+            while (s.Length < 18) s += " ";
+            return s;
+        }
+
+        // 対話形式で 1 項目ずつ変更する
+        public static void Edit(Config cfg)
+        {
+            Console.WriteLine();
+            ConsoleUi.Bold("  設定の編集");
+            Console.WriteLine();
+            for (int i = 0; i < Fields.Length; i++)
+            {
+                Field f = Fields[i];
+                Console.WriteLine("    " + (i + 1).ToString().PadLeft(2) + ". "
+                    + Pad(f.Key) + " = " + Display(cfg, f));
+                ConsoleUi.Dim("        " + f.Help + "\n");
+            }
+            Console.WriteLine();
+            ConsoleUi.Dim("  変更する項目の番号を入力 (Enter で中止): ");
+            string pick = Console.ReadLine();
+            if (pick == null) return;
+            pick = pick.Trim();
+            if (pick.Length == 0) { ConsoleUi.Dim("  中止しました\n"); return; }
+
+            int idx;
+            if (!int.TryParse(pick, out idx) || idx < 1 || idx > Fields.Length)
+            {
+                ConsoleUi.Danger("  番号が不正です\n");
+                return;
+            }
+
+            Field field = Fields[idx - 1];
+            Console.WriteLine();
+            Console.WriteLine("  " + field.Key + "  (" + field.Help + ")");
+            Console.WriteLine("  現在値: " + Display(cfg, field));
+
+            string value;
+            if (field.Kind == "text")
+            {
+                ConsoleUi.Dim("  新しい値を入力 (空行だけで終了。空にはできません):\n");
+                StringBuilder sb = new StringBuilder();
+                while (true)
+                {
+                    string ln = Console.ReadLine();
+                    if (ln == null) break;
+                    if (ln.Length == 0) break;
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append(ln);
+                }
+                value = sb.ToString();
+                if (value.Trim().Length == 0) { ConsoleUi.Dim("  中止しました\n"); return; }
+            }
+            else
+            {
+                ConsoleUi.Dim("  新しい値を入力 (Enter で中止): ");
+                value = Console.ReadLine();
+                if (value == null) return;
+                if (value.Trim().Length == 0 && field.Kind != "string" && field.Kind != "secret")
+                {
+                    ConsoleUi.Dim("  中止しました\n");
+                    return;
+                }
+            }
+
+            if (!Apply(cfg, field, value))
+            {
+                ConsoleUi.Danger("  値が不正です: " + value + "\n");
+                return;
+            }
+            cfg.Save();
+            ConsoleUi.Info(field.Key + " = " + Display(cfg, field) + "  に変更しました");
         }
     }
 }

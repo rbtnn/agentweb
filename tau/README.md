@@ -5,8 +5,7 @@
 （`agentweb` のソースを参考に、必要な部分を単一ファイルに書き起こしています）。
 
 HTTP サーバも Web UI も持たず、標準入出力だけで対話します。
-**設定ファイルとセッションは `agentweb` と共有**するため、`agentweb` で続けた会話を
-`tau` で開いて続きから対話できます（逆も同じです）。
+**設定もセッションも `tau` 独自のファイル**を使い、`agentweb` とは共有しません。
 
 ---
 
@@ -36,7 +35,7 @@ mono tau.exe
 ```
 tau.exe [オプション]
 
-  --config <path>    設定ファイル（agentweb.json）のパス
+  --config <path>    設定ファイル（tau.json）のパス
   --session <id>     既存セッションを開いて続きから対話する
   --list             保存済みセッションの一覧を表示して終了
   --diag             接続診断(TLS/HTTP)を実行して終了
@@ -73,32 +72,20 @@ tau.exe [オプション]
 
 ---
 
-## agentweb と同じファイルを参照する
+## 設定とデータの保存先
 
-`tau` は**独自の設定ファイルやデータディレクトリを持ちません**。
-`agentweb` とまったく同じ場所・同じ形式のファイルを読み書きします。
+`tau` は `agentweb` とは独立した場所に保存します。
 
 | 種類 | パス |
 |---|---|
-| 設定 | `%APPDATA%\agentweb\agentweb.json` |
-| セッション | `%APPDATA%\agentweb\sessions\<id>.json` |
-| 最後に開いたセッション / 下書き | `%APPDATA%\agentweb\sessions\_state.json` |
+| 設定 | `%APPDATA%\tau\tau.json` |
+| セッション | `%APPDATA%\tau\sessions\<id>.json` |
+| 最後に開いたセッション | `%APPDATA%\tau\sessions\_state.json` |
 
-Linux / macOS では `~/.config/agentweb/` が使われます
-（`agentweb` の `AppDataDir()` と同じ解決方法）。
+Linux / macOS では `~/.config/tau/` が使われます。
 
-### 共有されるもの
-
-- **API 接続先・API キー・モデル・モデル一覧**（`llmApiUrl` / `llmApiKey` / `model` / `models`）
-- **ツール実行の可否**（`allowTools`）
-- **コンテキスト上限・要約の設定**（`contextWindow` / `reserveTokens` / `keepRecentTokens`）
-- **プロキシ設定**（`proxyUrl` / `proxyUser` / `proxyPass` / `useSystemProxy`）
-- **システムプロンプト**（`systemPrompt`）
-- **会話履歴**（`messages`。`ts` / `steps` / `think` も同じ形式で保存）
-
-そのため、**`agentweb` で作った会話を `tau` で開いて続きから対話**でき、
-`tau` で作った会話を `agentweb` の画面で開くこともできます。
-`/model` での切り替えは `agentweb.json` に保存されるので、次回どちらのプログラムからでも同じモデルが使われます。
+> セッションの**ファイル形式**は `agentweb` と同じ（互換）ですが、
+> **保存先は共有しません**。`agentweb` の設定・セッションには一切触れません。
 
 ### 環境変数
 
@@ -111,16 +98,16 @@ MAX_TOOLS_PER_TURN / TOOL_TIMEOUT_SEC
 LLM_CONTEXT_WINDOW / LLM_RESERVE_TOKENS / LLM_KEEP_RECENT_TOKENS
 LLM_PROXY_URL / LLM_PROXY_USERNAME / LLM_PROXY_PASSWORD / LLM_USE_SYSTEM_PROXY
 AI_SYSTEM_PROMPT
-AGENTWEB_CONFIG
+TAU_CONFIG
 ```
 
-`agentweb.json` が無くても、環境変数だけで動作します。
+`tau.json` が無くても、環境変数だけで動作します。
 
 ---
 
-## 設定項目
+## 設定項目（`tau.json`）
 
-`agentweb` と同じスキーマです。`tau` が使う項目は次のとおりです。
+`tau` が使う項目は次のとおりです。
 
 ```json
 {
@@ -144,8 +131,56 @@ AGENTWEB_CONFIG
 ```
 
 - `models` は**モデル名の一覧**です。接続先・API キー・コンテキスト上限は全モデル共通の 1 つを使います。
-- `agentweb` 側の `port` / `theme` / `bindPath` / `openBrowserOnStart` は `tau` では使いません
-  （読み込んでも無視され、保存時も変更しません）。
+- `tau` が扱わないキーを手で追記しても、保存時に失われません。
+
+### プロンプトから設定を変更する
+
+`tau.json` を直接編集しなくても、対話中に設定を変更できます。
+
+| コマンド | 説明 |
+|---|---|
+| `/config` | 現在の設定を一覧表示（API キーは伏せ字） |
+| `/config edit` | 番号を選んで 1 項目ずつ対話形式で変更 |
+| `/set <key> <value>` | 1 項目だけ変更 |
+| `/model [名]` | モデルの表示・切り替え |
+| `/tools` | ツール実行の on/off を切り替え |
+
+```
+> /config
+  設定ファイル: C:\Users\...\AppData\Roaming\tau\tau.json
+
+    llmApiUrl          = https://api.openai.com/v1/chat/completions
+    llmApiKey          = sk-...********
+    model              = gpt-4o-mini
+    models             = gpt-4o-mini, gpt-4o
+    allowTools         = true
+    emitReasoning      = true
+    contextWindow      = 64000
+    ...
+
+> /set model gpt-4o
+  · model = gpt-4o  に変更しました
+
+> /set contextWindow 128000
+  · contextWindow = 128000  に変更しました
+
+> /config edit
+  1. llmApiUrl          = https://...
+     OpenAI 互換の /chat/completions の URL
+  2. llmApiKey          = sk-...********
+     API キー(表示時は伏せ字)
+  ...
+  変更する項目の番号を入力 (Enter で中止): 3
+  model  (使用するモデル名)
+  現在値: gpt-4o
+  新しい値を入力 (Enter で中止): gpt-4o-mini
+  · model = gpt-4o-mini  に変更しました
+```
+
+変更は即座に `tau.json` へ保存され、次のターンから反映されます。
+`systemPrompt` だけは**複数行**で入力できます（空行で終了）。
+
+入力チェックも行います（不明な key、数値でない値、不正な真偽値は拒否）。
 
 ---
 
@@ -172,7 +207,7 @@ ANSI エスケープが使える環境（Windows 10 以降のコンソール、U
 | `curl` | HTTP/HTTPS リクエスト送信（プロキシ設定を反映） | `url`, `method`?, `headers`?, `body`? |
 
 ツール実行は `▶ ツール実行: <name>  <detail>` として 1 行で表示され、
-実行記録はセッションの `steps` に保存されます（`agentweb` の画面でも同じように表示されます）。
+実行記録はセッションの `steps` に保存され、`/open` で再開したときにも表示されます。
 
 ### TLS（HTTPS 接続）
 
@@ -327,8 +362,12 @@ python3 test_tau.py
 |---|---|
 | ストリーミング | 思考と本文が表示されるか |
 | ツールループ | ツール実行 → 結果を LLM へ返して再問い合わせするか |
-| 設定の共有 | `agentweb.json` を参照しているか |
-| セッション形式 | `agentweb` と同じキー・同じ場所に保存されるか |
+| 設定の分離 | `tau.json` を参照し、`agentweb.json` に触れないか |
+| セッションの分離 | `%APPDATA%\tau\sessions` に保存し、agentweb 側を汚さないか |
+| セッション形式 | `agentweb` と同じキーで保存されるか |
+| `/config` | 設定一覧を表示し、API キーが伏せ字になるか |
+| `/set` | 値の変更と保存、不正値の拒否ができるか |
+| `/config edit` | 対話形式で変更・保存できるか |
 | `think` / `steps` | 保存され、再開時に復元されるか |
 | `_state.json` | 最後のセッションが記録されるか |
 | 再開 | `--session` で続きから開けるか（LLM を呼ばないか） |

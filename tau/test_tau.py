@@ -113,16 +113,19 @@ def main():
         return 1
     ok("tau.exe をビルドしました")
 
-    # agentweb と同じ場所を使う(テスト用に HOME を差し替える)
+    # tau 独自の場所を使う(テスト用に HOME を差し替える)
     work = tempfile.mkdtemp(prefix="tau_home_")
-    appdata = os.path.join(work, ".config", "agentweb")
+    appdata = os.path.join(work, ".config", "tau")
     os.makedirs(appdata, exist_ok=True)
+    # agentweb 側のディレクトリも作り、混ざらないことを確認できるようにする
+    agentweb_dir = os.path.join(work, ".config", "agentweb")
+    os.makedirs(agentweb_dir, exist_ok=True)
 
     srv = HTTPServer(("127.0.0.1", 0), Mock)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-    cfg_path = os.path.join(appdata, "agentweb.json")
+    cfg_path = os.path.join(appdata, "tau.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump({
             "llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % port,
@@ -132,7 +135,7 @@ def main():
             "allowTools": True,
             "emitReasoning": True,
             "contextWindow": 64000,
-            # agentweb 専用の設定。tau が保存しても失われないこと。
+            # tau が扱わない項目。保存しても失われないこと(手で追記した設定を守る)。
             "port": 8787,
             "theme": "light",
             "bindPath": ".",
@@ -154,6 +157,13 @@ def main():
                            text=True, env=env, timeout=timeout,
                            cwd=os.path.dirname(exe))
         return p.stdout + p.stderr
+
+    # agentweb 側に別の設定を置いておく(tau が触らないこと)
+    aw_cfg_path = os.path.join(agentweb_dir, "agentweb.json")
+    with open(aw_cfg_path, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://agentweb-only/v1", "model": "aw-model",
+                   "port": 8787, "theme": "light"}, f, ensure_ascii=False)
+    aw_before = open(aw_cfg_path, encoding="utf-8").read()
 
     # ---- 1. 対話(ストリーミング + ツール) ----
     Mock.calls = []
@@ -178,9 +188,13 @@ def main():
 
     # 設定ファイルが agentweb のものを使っている
     if cfg_path in out:
-        ok("agentweb の設定ファイル(agentweb.json)を参照しています")
+        ok("tau 独自の設定ファイル(tau.json)を参照しています")
     else:
         bad("設定ファイルのパスが想定と違います: " + out[:400])
+    if "agentweb.json" not in out:
+        ok("agentweb の設定ファイルは参照しません")
+    else:
+        bad("agentweb.json を参照しています: " + out[:400])
 
     # ---- 2. セッションが agentweb と同じ形式で保存される ----
     sdir = os.path.join(appdata, "sessions")
@@ -190,6 +204,11 @@ def main():
     else:
         bad("セッションが保存されていません")
         return 1
+    aw_sdir = os.path.join(agentweb_dir, "sessions")
+    if not os.path.exists(aw_sdir) or not os.listdir(aw_sdir):
+        ok("agentweb 側の sessions には何も書きません")
+    else:
+        bad("agentweb 側の sessions に書き込んでいます")
 
     sid = files[0][:-5]
     with open(os.path.join(sdir, files[0]), encoding="utf-8-sig") as f:
@@ -258,17 +277,17 @@ def main():
     with open(cfg_path, encoding="utf-8-sig") as f:
         saved = json.load(f)
     if saved.get("model") == "other-model":
-        ok("モデルの切り替えが agentweb の設定ファイルに保存されます")
+        ok("モデルの切り替えが tau.json に保存されます")
     else:
         bad("モデルが保存されていません: %r" % saved.get("model"))
-    # agentweb 専用のキーが tau の保存で失われないこと
+    # tau が扱わないキーが保存で失われないこと
     kept = {"port": 8787, "theme": "light", "bindPath": ".",
             "openBrowserOnStart": False}
     missing = [k for k, v in kept.items() if saved.get(k) != v]
     if not missing:
-        ok("agentweb 専用の設定(port/theme/bindPath/openBrowserOnStart)が保持されます")
+        ok("tau が扱わないキー(手で追記した設定)が保持されます")
     else:
-        bad("agentweb 専用の設定が失われました: %r" % missing)
+        bad("tau が扱わないキーが失われました: %r" % missing)
 
     # ---- 6. API エラーで落ちない ----
     bad_cfg = os.path.join(work, "bad.json")
@@ -325,6 +344,60 @@ def main():
         ok("/new で毎回異なるセッションが作られます")
     else:
         bad("/new が同じセッションを開き直しています: %r" % ids)
+
+    # ---- 6e. 設定コマンド ----
+    out = run_tau("/config\n/exit\n")
+    if "llmApiUrl" in out and "contextWindow" in out and "allowTools" in out:
+        ok("/config が設定一覧を表示します")
+    else:
+        bad("/config の出力が想定と違います: " + out[-400:])
+    # sk-test は 7 文字なので全体が伏せ字(*******)になる
+    if "sk-test" not in out and "llmApiKey          = ***" in out:
+        ok("API キーは伏せ字で表示されます")
+    else:
+        bad("API キーが伏せ字になっていません: " + out[-400:])
+
+    out = run_tau("/set contextWindow 128000\n/set allowTools false\n/exit\n")
+    if "128000" in out and "false" in out:
+        ok("/set で数値と真偽値を変更できます")
+    else:
+        bad("/set が効いていません: " + out[-400:])
+    with open(cfg_path, encoding="utf-8-sig") as f:
+        saved = json.load(f)
+    if saved.get("contextWindow") == 128000 and saved.get("allowTools") is False:
+        ok("/set の変更が tau.json に保存されます")
+    else:
+        bad("/set の変更が保存されていません: %r"
+            % {k: saved.get(k) for k in ("contextWindow", "allowTools")})
+
+    out = run_tau("/set models m1,m2,m3\n/set bogus 1\n/set contextWindow abc\n/exit\n")
+    if "m1, m2, m3" in out:
+        ok("/set models で一覧を変更できます")
+    else:
+        bad("/set models が効いていません: " + out[-400:])
+    if "不明な設定項目" in out and "値が不正" in out:
+        ok("/set は不正な key / 値を拒否します")
+    else:
+        bad("/set の入力チェックがありません")
+
+    out = run_tau("/config edit\n3\nedited-model\n/exit\n")
+    if "edited-model" in out:
+        ok("/config edit で対話形式の変更ができます")
+    else:
+        bad("/config edit が効いていません: " + out[-500:])
+    with open(cfg_path, encoding="utf-8-sig") as f:
+        saved = json.load(f)
+    if saved.get("model") == "edited-model":
+        ok("/config edit の変更が保存されます")
+    else:
+        bad("/config edit の変更が保存されていません: %r" % saved.get("model"))
+
+    # agentweb 側の設定は一切変更されていないこと
+    aw_after = open(aw_cfg_path, encoding="utf-8").read()
+    if aw_after == aw_before:
+        ok("tau の設定変更で agentweb.json は変更されません")
+    else:
+        bad("agentweb.json が変更されました")
 
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
