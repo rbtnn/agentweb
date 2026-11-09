@@ -172,6 +172,26 @@ ANSI エスケープが使える環境（Windows 10 以降のコンソール、U
 ツール実行は `▶ ツール実行: <name>  <detail>` として 1 行で表示され、
 実行記録はセッションの `steps` に保存されます（`agentweb` の画面でも同じように表示されます）。
 
+### TLS（HTTPS 接続）
+
+`tau` は LLM API へ接続する前に **TLS のバージョンを明示**します。
+
+.NET Framework のターゲットが 4.7 未満だと既定が TLS 1.0 相当になり、
+TLS 1.2 以上を要求する API（OpenAI 系・DeepSeek 系など）で次のエラーになります。
+
+```
+⚠ エラー: LLM API(stream)エラー: 要求は中止されました:
+SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした
+```
+
+`EnsureTls()` が次の順で設定します。
+
+1. **`SecurityProtocolType.SystemDefault`** が使えるならそれを使う
+   （OS に最適なバージョンを選ばせる。Windows 10 なら TLS 1.2、Windows 11 なら TLS 1.3）
+2. 無い場合（古い .NET）は **`Tls12`** を明示し、`Tls13` があれば併せて有効にする
+
+この設定は **LLM 呼び出し**と **`curl` ツール**の両方に適用されます。
+
 ### コンテキストの自動整理
 
 会話が `contextWindow - reserveTokens` を超えると、古い部分を LLM で要約し、
@@ -200,6 +220,8 @@ python3 test_tau.py
 | 再開 | `--session` で続きから開けるか（LLM を呼ばないか） |
 | コマンド | `/model` `/tools` が効き、設定に保存されるか |
 | エラー | API エラーで落ちずに表示して続行するか |
+| TLS | `SystemDefault` を優先し、`Tls12` のフォールバックがあるか |
+| TLS 適用 | LLM 呼び出しと `curl` の両方で設定しているか |
 
 ---
 

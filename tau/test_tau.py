@@ -244,7 +244,30 @@ def main():
     else:
         bad("API エラー時の挙動が想定と違います: " + out[-400:])
 
-    # ---- 7. --help ----
+    # ---- 7. TLS 設定 ----
+    # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
+    # TLS 1.2 以上を要求する API で
+    #   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした」
+    # になる。EnsureTls() が SystemDefault / Tls12 以上を設定していることを確認する。
+    tls_src = open(SRC, encoding="utf-8").read()
+    if "EnsureTls" in tls_src and "ServicePointManager.SecurityProtocol" in tls_src:
+        ok("TLS バージョンを明示する処理(EnsureTls)があります")
+    else:
+        bad("EnsureTls がありません")
+    if "SystemDefault" in tls_src:
+        ok("OS に任せる SystemDefault を優先しています")
+    else:
+        bad("SystemDefault を使っていません")
+    if "SecurityProtocolType.Tls12" in tls_src:
+        ok("古い .NET 向けに TLS 1.2 のフォールバックがあります")
+    else:
+        bad("TLS 1.2 のフォールバックがありません")
+    if tls_src.count("EnsureTls()") >= 3:
+        ok("LLM 呼び出しと curl ツールの両方で TLS 設定を適用しています")
+    else:
+        bad("TLS 設定の適用箇所が足りません: %d" % tls_src.count("EnsureTls()"))
+
+    # ---- 8. --help ----
     out = run_tau("", args=["--help"])
     if "/model" in out and "/sessions" in out:
         ok("--help にコマンド一覧が表示されます")

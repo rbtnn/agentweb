@@ -855,6 +855,57 @@ namespace Tau
         // 処理中のリクエスト(Ctrl+C で中断するため)
         static volatile HttpWebRequest current;
 
+        static bool tlsConfigured;
+
+        // TLS のバージョンを設定する。
+        //
+        // 何もしないと、ターゲットフレームワークが 4.7 未満のアプリでは
+        // 既定が Ssl3|Tls (TLS 1.0) 相当になり、TLS 1.2 以上を要求する API
+        // (OpenAI 系・DeepSeek 系・多くのプロキシ) で
+        //   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした」
+        // になる。
+        //
+        // 対処の優先順位:
+        //   1. SecurityProtocolType.SystemDefault が使えるなら、それを使う。
+        //      OS に最適なバージョン(Windows 10 なら TLS 1.2、11 なら 1.3)を
+        //      選ばせられるため、これが最も将来性が高い。
+        //   2. 無い場合(古い .NET)は Tls12 を明示する。
+        //      Tls13 が定義されていれば併せて有効にする。
+        public static void EnsureTls()
+        {
+            if (tlsConfigured) return;
+            tlsConfigured = true;
+
+            // 1. SystemDefault (OS に任せる)
+            try
+            {
+                object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
+                if (sd != null)
+                {
+                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
+                    return;
+                }
+            }
+            catch { }
+
+            // 2. 明示的に TLS 1.2 以上を有効にする
+            try
+            {
+                SecurityProtocolType proto = SecurityProtocolType.Tls12;
+
+                // Tls13 は .NET Framework 4.8 以降にしか無いため、名前で確認する
+                try
+                {
+                    object t13 = Enum.Parse(typeof(SecurityProtocolType), "Tls13");
+                    if (t13 != null) proto |= (SecurityProtocolType)t13;
+                }
+                catch { }
+
+                ServicePointManager.SecurityProtocol = proto;
+            }
+            catch { }
+        }
+
         public static void Cancel()
         {
             HttpWebRequest r = current;
@@ -866,6 +917,7 @@ namespace Tau
 
         static void Setup(HttpWebRequest request, Config cfg, byte[] payload)
         {
+            EnsureTls();
             ProxyHelper.Apply(request, cfg);
             request.Method = "POST";
             request.ContentType = "application/json";
@@ -1508,6 +1560,7 @@ namespace Tau
             try
             {
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url.Trim());
+                LlmClient.EnsureTls();   // HTTPS 先でも TLS 1.2 以上を使えるようにする
                 ProxyHelper.Apply(request, cfg);
                 request.Method = method;
                 request.Timeout = cfg.ToolTimeoutSec * 1000;
