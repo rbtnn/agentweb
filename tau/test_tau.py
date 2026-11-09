@@ -415,6 +415,16 @@ def main():
         ok("--diag が接続診断を実行します")
     else:
         bad("--diag が動作しません: " + out[-400:])
+    # HEAD を使うと HEAD 非対応サーバで 501 になり、TLS が使えるのに NG と誤表示する。
+    # TCP + TLS ハンドシェイクのみで判定すること。
+    if "ProbeTls" in tls_src and "AuthenticateAsClient" in tls_src:
+        ok("TLS 試験は TCP + ハンドシェイクのみで判定します")
+    else:
+        bad("TLS 試験が HTTP メソッドに依存しています")
+    if 'req.Method = "HEAD"' not in tls_src:
+        ok("TLS 試験に HEAD を使っていません")
+    else:
+        bad("TLS 試験に HEAD を使っています(501 で誤判定になる)")
     if "runtime=" in out and "SecurityProtocol=" in out:
         ok("--diag が環境情報を表示します")
     else:

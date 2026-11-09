@@ -207,13 +207,29 @@ tau.exe --diag
 
 ```
   [TLS の接続試験]
-    SystemDefault : NG  TrustFailure: ...
-    Tls12         : OK  HTTP 200 (1.1)
-    Tls11         : NG  SecureChannelFailure: ...
+    (TCP 接続 + TLS ハンドシェイクのみを試します。HTTP は送りません)
+
+    SystemDefault : NG  AuthenticationException: ... <- ...CERTIFICATE_VERIFY_FAILED
+    Tls12         : OK  Tls12 / Aes128
+    Tls11         : NG  AuthenticationException: ... <- ...TLSV1_ALERT_PROTOCOL_VERSION
 ```
 
-`Tls12` が `OK` なら接続は成立します。すべて `NG` の場合は OS / .NET / プロキシ側の
-TLS 設定を確認してください。
+TLS の可否は **TCP 接続 + TLS ハンドシェイクだけ**で判定します（HTTP は送りません）。
+`HEAD` を使うと HEAD 非対応のサーバで `501` が返り、TLS が使えるのに NG と誤表示するためです。
+
+#### 出力の見方
+
+| 表示 | 意味 |
+|---|---|
+| **API 呼び出し試験が OK** | 接続・認証は正常（これが最終判定） |
+| `TLSV1_ALERT_PROTOCOL_VERSION` | サーバがその TLS バージョンを受け付けない |
+| `CERTIFICATE_VERIFY_FAILED` | 証明書の検証に失敗（社内プロキシの傍受など） |
+| `SslProtocolType` エラー | .NET がその値（`SystemDefault` 等）を解釈できない |
+| `501 実装されていません` | HTTP メソッド（HEAD）が未対応 |
+
+**`API 呼び出し試験` が `OK` なら、`tau` の接続は正常です。**
+TLS の接続試験が NG でも、それは試験方法の差であり、
+実際の `HttpWebRequest` は別経路で成功している場合があります。
 
 さらに詳しく見たい場合は**デバッグ出力**を有効にします。
 

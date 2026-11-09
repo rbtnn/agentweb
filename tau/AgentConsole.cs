@@ -2794,52 +2794,34 @@ namespace Tau
 
             // --- TLS の各バージョンを試す ---
             Console.WriteLine("  [TLS の接続試験]");
-            string[] names = { "SystemDefault", "Tls12", "Tls11", "Tls", "Tls13" };
-            SecurityProtocolType original = ServicePointManager.SecurityProtocol;
-            foreach (string n in names)
+            Console.WriteLine("    (TCP 接続 + TLS ハンドシェイクのみを試します。HTTP は送りません)");
+            Console.WriteLine();
+
+            // TLS の可否は TCP 接続 + SslStream のハンドシェイクだけで判定する。
+            // HTTP のメソッド(HEAD 等)を使うと、サーバが HEAD 非対応の場合に
+            // 501 が返り、TLS が使えるのに NG と誤表示してしまうため。
+            string[] names = { "SystemDefault", "Tls12", "Tls13", "Tls11", "Tls" };
+            bool anyOk = false;
+            for (int i = 0; i < names.Length; i++)
             {
+                string n = names[i];
                 object v = null;
                 try { v = Enum.Parse(typeof(SecurityProtocolType), n); }
                 catch { }
                 if (v == null)
                 {
-                    Console.WriteLine("    " + n.PadRight(14) + ": (この .NET には無い)");
+                    Console.WriteLine("    " + Pad(n) + ": (この .NET には無い)");
                     continue;
                 }
-                try
-                {
-                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)v;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("    " + n.PadRight(14) + ": 設定不可 (" + ex.Message + ")");
-                    continue;
-                }
-
-                string result;
-                try
-                {
-                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(uri);
-                    req.Method = "HEAD";
-                    req.Timeout = 15000;
-                    req.AllowAutoRedirect = false;
-                    ProxyHelper.Apply(req, cfg);
-                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-                        result = "OK  HTTP " + (int)resp.StatusCode + " (" + resp.ProtocolVersion + ")";
-                }
-                catch (WebException wex)
-                {
-                    result = "NG  " + wex.Status + ": " + FirstLine(wex.Message);
-                    if (wex.InnerException != null)
-                        result += "  <- " + FirstLine(wex.InnerException.Message);
-                }
-                catch (Exception ex)
-                {
-                    result = "NG  " + ex.GetType().Name + ": " + FirstLine(ex.Message);
-                }
-                Console.WriteLine("    " + n.PadRight(14) + ": " + result);
+                string result = ProbeTls(uri, cfg, (SecurityProtocolType)v);
+                if (result.StartsWith("OK")) anyOk = true;
+                Console.WriteLine("    " + Pad(n) + ": " + result);
             }
-            try { ServicePointManager.SecurityProtocol = original; } catch { }
+            Console.WriteLine();
+            if (anyOk)
+                ConsoleUi.Dim("    → TLS ハンドシェイクは成功しています。\n");
+            else
+                ConsoleUi.Danger("    → すべての TLS でハンドシェイクに失敗しました。\n");
             Console.WriteLine();
 
             // --- 実際の API 呼び出し ---
@@ -2872,8 +2854,71 @@ namespace Tau
             }
             Console.WriteLine();
 
-            ConsoleUi.Dim("  上記で OK が出る TLS が使えれば、tau の接続は成立します。\n");
-            ConsoleUi.Dim("  すべて NG の場合は OS / .NET / プロキシ側の TLS 設定を確認してください。\n");
+            ConsoleUi.Dim("  [判定の見方]\n");
+            ConsoleUi.Dim("    ・API 呼び出し試験が OK なら、tau の接続・認証は正常です。\n");
+            ConsoleUi.Dim("      TLS の接続試験が NG でも、それは証明書やプロトコルの試験結果で、\n");
+            ConsoleUi.Dim("      HttpWebRequest は別の経路で成功している場合があります。\n");
+            ConsoleUi.Dim("    ・TLSV1_ALERT_PROTOCOL_VERSION = サーバがその TLS を受け付けない\n");
+            ConsoleUi.Dim("    ・CERTIFICATE_VERIFY_FAILED = 証明書の検証に失敗(社内プロキシ等)\n");
+            ConsoleUi.Dim("    ・SslProtocolType エラー = .NET がその値を解釈できない\n");
+        }
+
+        static string Pad(string s)
+        {
+            if (s == null) s = "";
+            while (s.Length < 14) s += " ";
+            return s;
+        }
+
+        // TCP 接続 → TLS ハンドシェイクだけを試す(HTTP は送らない)。
+        // HTTP メソッドに依存せず、TLS そのものの可否を判定できる。
+        static string ProbeTls(Uri uri, Config cfg, SecurityProtocolType proto)
+        {
+            System.Net.Sockets.TcpClient client = null;
+            System.Net.Security.SslStream ssl = null;
+            try
+            {
+                client = new System.Net.Sockets.TcpClient();
+                System.Net.Sockets.TcpClient c = client;
+                IAsyncResult ar = c.BeginConnect(uri.Host, uri.Port, null, null);
+                if (!ar.AsyncWaitHandle.WaitOne(15000))
+                {
+                    try { c.Close(); } catch { }
+                    return "NG  接続タイムアウト(15秒)";
+                }
+                c.EndConnect(ar);
+
+                ssl = new System.Net.Security.SslStream(client.GetStream(), false,
+                    delegate(object sender, System.Security.Cryptography.X509Certificates.X509Certificate cert,
+                             System.Security.Cryptography.X509Certificates.X509Chain chain,
+                             System.Net.Security.SslPolicyErrors errors)
+                    {
+                        // 証明書の検証は行う(検証失敗はそのまま例外になる)
+                        return errors == System.Net.Security.SslPolicyErrors.None;
+                    });
+
+                ssl.AuthenticateAsClient(uri.Host, null,
+                    (System.Security.Authentication.SslProtocols)(int)proto, false);
+
+                string ver = "?";
+                try { ver = ssl.SslProtocol.ToString(); } catch { }
+                return "OK  " + ver + " / " + ssl.CipherAlgorithm.ToString();
+            }
+            catch (Exception ex)
+            {
+                // 例外の型と最初のメッセージだけを出す
+                string msg = ex.Message ?? "";
+                if (msg.Length > 160) msg = msg.Substring(0, 160) + "...";
+                string inner = (ex.InnerException != null) ? FirstLine(ex.InnerException.Message) : "";
+                string detail = "NG  " + ex.GetType().Name + ": " + msg;
+                if (inner.Length > 0 && inner != msg) detail += "  <- " + inner;
+                return detail;
+            }
+            finally
+            {
+                try { if (ssl != null) ssl.Dispose(); } catch { }
+                try { if (client != null) client.Close(); } catch { }
+            }
         }
 
         static string FirstLine(string s)
