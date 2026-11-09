@@ -1156,15 +1156,27 @@ namespace Tau
         // ---- 非ストリーミング呼び出し(要約など) ----
         public static LlmResp CallOnce(Config cfg, List<object> messages, bool useTools)
         {
-            try
+            const int MAX_ATTEMPTS = 3;
+            for (int attempt = 1; ; attempt++)
             {
-                return CallOnceInternal(cfg, messages, useTools);
-            }
-            catch (WebException wex)
-            {
-                if (IsTlsFailure(wex) && EscalateTls())
+                try
+                {
                     return CallOnceInternal(cfg, messages, useTools);
-                throw;
+                }
+                catch (WebException wex)
+                {
+                    Dbg("WebException(CallOnce): status=" + wex.Status
+                        + " (attempt " + attempt + "/" + MAX_ATTEMPTS + ")");
+
+                    if (!IsRetryable(wex) || attempt >= MAX_ATTEMPTS) throw;
+
+                    if (IsTlsFailure(wex) && EscalateTls())
+                        ConsoleUi.Info("TLS の設定を変更して再試行します…");
+                    else
+                        ConsoleUi.Info("接続を再試行します(" + attempt + "/" + (MAX_ATTEMPTS - 1) + ")…");
+
+                    System.Threading.Thread.Sleep(500 * attempt);
+                }
             }
         }
 
@@ -1251,22 +1263,60 @@ namespace Tau
         public static LlmResp CallStream(Config cfg, List<object> messages, bool useTools,
                                          Action<string> contentCb, Action<string> reasoningCb)
         {
-            try
+            // TLS / 接続の一時的な失敗は再試行する。
+            // SecureChannelFailure は一時的なことも多いため、
+            // TLS 設定を変えられなくても数回は試す。
+            const int MAX_ATTEMPTS = 3;
+            for (int attempt = 1; ; attempt++)
             {
-                return CallStreamOnce(cfg, messages, useTools, contentCb, reasoningCb);
-            }
-            catch (WebException wex)
-            {
-                Dbg("WebException: status=" + wex.Status);
-                Dbg("  連鎖: " + ExceptionChain(wex));
-                Dbg("  IsTlsFailure=" + IsTlsFailure(wex) + " / EscalateTls=" + EscalateTls());
-
-                if (IsTlsFailure(wex) && EscalateTls())
+                try
                 {
-                    ConsoleUi.Info("TLS の設定を変更して再試行します…");
                     return CallStreamOnce(cfg, messages, useTools, contentCb, reasoningCb);
                 }
-                throw;
+                catch (WebException wex)
+                {
+                    Dbg("WebException: status=" + wex.Status + " (attempt " + attempt + "/" + MAX_ATTEMPTS + ")");
+                    Dbg("  連鎖: " + ExceptionChain(wex));
+
+                    bool retryable = IsRetryable(wex);
+                    Dbg("  IsTlsFailure=" + IsTlsFailure(wex) + " retryable=" + retryable);
+
+                    if (!retryable || attempt >= MAX_ATTEMPTS) throw;
+
+                    // TLS 設定をまだ変えられるなら変える
+                    if (IsTlsFailure(wex) && EscalateTls())
+                        ConsoleUi.Info("TLS の設定を変更して再試行します…");
+                    else
+                        ConsoleUi.Info("接続を再試行します(" + attempt + "/" + (MAX_ATTEMPTS - 1) + ")…");
+
+                    // 少し待ってから再試行する(指数バックオフ)
+                    int wait = 500 * attempt;
+                    System.Threading.Thread.Sleep(wait);
+                }
+            }
+        }
+
+        // 再試行する価値のある失敗か。
+        //  - TLS/接続系の一時的な失敗 → 再試行する
+        //  - HTTP エラー(401/429/500 など) → 再試行しても無駄なのでしない
+        public static bool IsRetryable(WebException wex)
+        {
+            if (wex == null) return false;
+            switch (wex.Status)
+            {
+                case WebExceptionStatus.SecureChannelFailure:
+                case WebExceptionStatus.ConnectionClosed:
+                case WebExceptionStatus.KeepAliveFailure:
+                case WebExceptionStatus.ReceiveFailure:
+                case WebExceptionStatus.SendFailure:
+                case WebExceptionStatus.Timeout:
+                case WebExceptionStatus.ConnectFailure:   // 接続拒否は再試行しても無駄なことが多いが1回は試す
+                    return true;
+                case WebExceptionStatus.TrustFailure:
+                case WebExceptionStatus.ProtocolError:    // HTTP エラー
+                    return false;
+                default:
+                    return false;
             }
         }
 

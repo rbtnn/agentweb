@@ -433,6 +433,18 @@ def main():
         ok("プロキシ表示が直接接続かどうかを区別します")
     else:
         bad("プロキシ表示が誤解を招く形式のままです")
+    if "IsRetryable" in tls_src:
+        ok("再試行すべき失敗かを判定しています")
+    else:
+        bad("再試行の判定がありません")
+    if "MAX_ATTEMPTS" in tls_src and "Thread.Sleep" in tls_src:
+        ok("一時的な失敗をバックオフ付きで再試行します")
+    else:
+        bad("再試行の回数/待機がありません")
+    if "ProtocolError" in tls_src and "TrustFailure" in tls_src:
+        ok("HTTP エラーと証明書エラーは再試行しません")
+    else:
+        bad("再試行除外の判定がありません")
     if "runtime=" in out and "SecurityProtocol=" in out:
         ok("--diag が環境情報を表示します")
     else:
