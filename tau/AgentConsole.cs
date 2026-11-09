@@ -1065,8 +1065,14 @@ namespace Tau
                 Dbg("  URL      : " + cfg.ApiBaseUrl);
                 Dbg("  Model    : " + cfg.Model);
                 Dbg("  TLS      : " + CurrentTls);
-                Dbg("  Proxy    : " + (request.Proxy == null ? "null(直接接続)"
-                    : request.Proxy.GetProxy(new Uri(cfg.ApiBaseUrl)).ToString()));
+                Uri u = new Uri(cfg.ApiBaseUrl);
+                string proxyDesc;
+                if (request.Proxy == null) proxyDesc = "null(直接接続)";
+                else if (request.Proxy.IsBypassed(u)) proxyDesc = "直接接続(プロキシを経由しない)";
+                else proxyDesc = request.Proxy.GetProxy(u).ToString();
+                Dbg("  Proxy    : " + proxyDesc);
+                Dbg("  useSystemProxy=" + cfg.UseSystemProxy
+                    + " proxyUrl='" + (cfg.ProxyUrl ?? "") + "'");
                 Dbg("  HTTP     : " + request.ProtocolVersion);
                 Dbg("  Expect100: " + request.ServicePoint.Expect100Continue);
                 Dbg("  KeepAlive: " + request.KeepAlive);
@@ -2851,6 +2857,32 @@ namespace Tau
             {
                 ConsoleUi.Danger("    結果     : NG " + ex.GetType().Name + "\n");
                 Console.WriteLine("    詳細     : " + ex.Message);
+            }
+            Console.WriteLine();
+
+            // --- ストリーミング呼び出し試験(対話と同じ経路) ---
+            Console.WriteLine("  [ストリーミング呼び出し試験]");
+            Console.WriteLine("    (対話と同じ経路。Accept: text/event-stream で SSE を受信します)");
+            try
+            {
+                StringBuilder got = new StringBuilder();
+                int chunks = 0;
+                LlmClient.CallStream(cfg, msgs, false,
+                    delegate (string d) { chunks++; if (got.Length < 200) got.Append(d); },
+                    delegate (string d) { });
+                Console.WriteLine("    結果     : OK  (受信チャンク " + chunks + " 個)");
+                Console.WriteLine("    応答     : " + FirstLine(got.ToString()));
+            }
+            catch (WebException wex)
+            {
+                ConsoleUi.Danger("    結果     : NG " + wex.Status + "\n");
+                Console.WriteLine("    詳細     : " + LlmClient.DescribeWebException(wex));
+                Console.WriteLine("    連鎖     : " + LlmClient.ExceptionChain(wex));
+            }
+            catch (Exception ex)
+            {
+                ConsoleUi.Danger("    結果     : NG " + ex.GetType().Name + "\n");
+                Console.WriteLine("    詳細     : " + LlmClient.ExceptionChain(ex));
             }
             Console.WriteLine();
 

@@ -425,6 +425,14 @@ def main():
         ok("TLS 試験に HEAD を使っていません")
     else:
         bad("TLS 試験に HEAD を使っています(501 で誤判定になる)")
+    if "ストリーミング呼び出し試験" in tls_src:
+        ok("--diag が対話と同じストリーミング経路も試験します")
+    else:
+        bad("ストリーミング経路の試験がありません")
+    if "IsBypassed" in tls_src:
+        ok("プロキシ表示が直接接続かどうかを区別します")
+    else:
+        bad("プロキシ表示が誤解を招く形式のままです")
     if "runtime=" in out and "SecurityProtocol=" in out:
         ok("--diag が環境情報を表示します")
     else:
