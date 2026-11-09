@@ -880,7 +880,7 @@ namespace Tau
             {
                 if (tlsStage == 0)
                 {
-                    // 第 1 段: OS に任せる(Windows 10 なら TLS 1.2、11 なら 1.3)
+                    // 第 0 段: OS に任せる
                     try
                     {
                         object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
@@ -891,21 +891,37 @@ namespace Tau
                         }
                     }
                     catch { }
-                    tlsStage = 1;   // SystemDefault が無い環境はすぐ第 2 段へ
+                    tlsStage = 1;   // SystemDefault が無い環境はすぐ第 1 段へ
                 }
 
-                // 第 2 段: TLS 1.2 以上を明示する
-                try
+                if (tlsStage == 1)
                 {
-                    SecurityProtocolType proto = SecurityProtocolType.Tls12;
-                    // Tls13 は .NET Framework 4.8 以降にしか無いため、名前で確認する
+                    // 第 1 段: TLS 1.2 を明示する。
+                    //
+                    // 注意: Tls12 に Tls13 を OR で混ぜてはいけない。
+                    // OS の Schannel 設定や .NET のバージョンで有効になっていない
+                    // プロトコルを要求すると、ハンドシェイク時に
+                    //   「指定された値は 'SslProtocolType' 列挙で有効ではありません。
+                    //     パラメーター名: sslProtocolType」
+                    // という ArgumentException になる。
+                    // TLS 1.2 は Windows 7 以降で必ず使えるため、単独指定が最も安全。
                     try
                     {
-                        object t13 = Enum.Parse(typeof(SecurityProtocolType), "Tls13");
-                        if (t13 != null) proto |= (SecurityProtocolType)t13;
+                        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                     }
                     catch { }
-                    ServicePointManager.SecurityProtocol = proto;
+                    return;
+                }
+
+                // 第 2 段: 最後の手段として OS 既定に戻す
+                // (古い TLS しか使えないサーバ・プロキシ向け)
+                try
+                {
+                    object sd = Enum.Parse(typeof(SecurityProtocolType), "SystemDefault");
+                    if (sd != null)
+                        ServicePointManager.SecurityProtocol = (SecurityProtocolType)sd;
+                    else
+                        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 }
                 catch { }
             }
@@ -917,12 +933,14 @@ namespace Tau
         {
             lock (tlsLock)
             {
-                if (tlsStage == 0)
+                // 第 0 段(SystemDefault) → 第 1 段(Tls12) → 第 2 段(OS 既定)
+                // と一段ずつ上げる。同じ段で無限に再試行しない。
+                if (tlsStage < 2)
                 {
-                    tlsStage = 1;      // 次は TLS 1.2 を明示する
+                    tlsStage++;
                     return true;
                 }
-                return false;          // すでに TLS 1.2 を指定済みなら諦める
+                return false;   // これ以上上げられない
             }
         }
 
@@ -932,6 +950,7 @@ namespace Tau
             if (wex == null) return false;
             if (wex.Status == WebExceptionStatus.SecureChannelFailure) return true;
             if (wex.Status == WebExceptionStatus.TrustFailure) return false;  // 証明書の問題
+
             // 内部例外に TLS/SslStream 系が含まれていればハンドシェイク失敗とみなす
             Exception e = wex.InnerException;
             int depth = 0;
@@ -942,6 +961,19 @@ namespace Tau
                     n.IndexOf("SslStream", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     n.IndexOf("Tls", StringComparison.OrdinalIgnoreCase) >= 0)
                     return true;
+
+                // 実測: 無効なプロトコルを要求すると、WebException の Status は
+                // ReceiveFailure で、内部例外が
+                //   ArgumentException: 指定された値は 'SslProtocolType' 列挙で
+                //                      有効ではありません。パラメーター名:sslProtocolType
+                // になる。これも TLS の設定不備なので、一段上げて再試行する。
+                if (e is ArgumentException)
+                {
+                    string m = e.Message ?? "";
+                    if (m.IndexOf("SslProtocol", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        m.IndexOf("sslProtocolType", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
                 e = e.InnerException;
                 depth++;
             }
@@ -2580,10 +2612,22 @@ namespace Tau
                 {
                     ConsoleUi.Dim("  TLS のハンドシェイクに失敗しました。\n");
                     ConsoleUi.Dim("  ・接続先: " + cfg.ApiBaseUrl + "\n");
-                    ConsoleUi.Dim("  ・.NET Framework 4.6.1 以前をターゲットにしていると、\n");
-                    ConsoleUi.Dim("    既定が TLS 1.0 のままになり、TLS 1.2 以上を要求する API に\n");
-                    ConsoleUi.Dim("    接続できません。tau は TLS 1.2 を明示して再試行済みです。\n");
-                    ConsoleUi.Dim("  ・プロキシ経由の場合は、プロキシ側の TLS 対応も確認してください。\n");
+                    ConsoleUi.Dim("  ・tau は SystemDefault → TLS 1.2 → OS 既定 の順に自動で再試行しました。\n");
+                    ConsoleUi.Dim("  ・それでも失敗する場合は、次のいずれかが原因です。\n");
+                    ConsoleUi.Dim("    1) OS 側で TLS 1.2 が無効になっている\n");
+                    ConsoleUi.Dim("       (Windows の「インターネットオプション」→ 詳細設定 →\n");
+                    ConsoleUi.Dim("        「TLS 1.2 を使用する」にチェック)\n");
+                    ConsoleUi.Dim("    2) .NET Framework の強暗号化が無効\n");
+                    ConsoleUi.Dim("       次のレジストリ値を 1 にする(DWORD):\n");
+                    ConsoleUi.Dim("       HKLM\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\n");
+                    ConsoleUi.Dim("         SchUseStrongCrypto\n");
+                    ConsoleUi.Dim("         SystemDefaultTlsVersions\n");
+                    ConsoleUi.Dim("       (32bit 版は WOW6432Node 側にも同じ値を設定)\n");
+                    ConsoleUi.Dim("    3) プロキシ経由の場合、プロキシ自体が TLS 1.2 に未対応\n");
+                    ConsoleUi.Dim("       (agentweb.json の proxyUrl / useSystemProxy を確認)\n");
+                    ConsoleUi.Dim("  ・切り分け: PowerShell で次を実行し、接続できるか確認できます。\n");
+                    ConsoleUi.Dim("       [Net.ServicePointManager]::SecurityProtocol = 'Tls12'\n");
+                    ConsoleUi.Dim("       Invoke-WebRequest " + cfg.ApiBaseUrl + " -Method Head\n");
                 }
             }
         }

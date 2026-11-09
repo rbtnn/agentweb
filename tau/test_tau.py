@@ -352,6 +352,27 @@ def main():
         ok("SecureChannelFailure を TLS 失敗として扱います")
     else:
         bad("SecureChannelFailure の判定がありません")
+    # Tls12 に Tls13 を混ぜると「SslProtocolType で有効ではありません」になるため、
+    # Tls12 を単独で指定していること。
+    if "SecurityProtocolType.Tls12 |" not in tls_src and "| (SecurityProtocolType)t13" not in tls_src:
+        ok("TLS 1.3 を OR で混ぜていません(Tls12 単独指定)")
+    else:
+        bad("Tls12 に Tls13 を混ぜています(無効なプロトコル指定になる)")
+    if "tlsStage < 2" in tls_src:
+        ok("エスカレーションが 3 段階(無限再試行しない)")
+    else:
+        bad("エスカレーションの段数制御がありません")
+    # 実測された症状: Status=ReceiveFailure + 内部例外
+    # 「指定された値は 'SslProtocolType' 列挙で有効ではありません」
+    # も TLS の設定不備として再試行対象にする必要がある。
+    if "SslProtocol" in tls_src and "ArgumentException" in tls_src:
+        ok("SslProtocolType の無効値エラーも TLS 失敗として扱います")
+    else:
+        bad("SslProtocolType エラーの判定がありません")
+    if "TrustFailure" in tls_src:
+        ok("証明書エラー(TrustFailure)は再試行対象外です")
+    else:
+        bad("TrustFailure の除外がありません")
     # SystemDefault(0) は列挙値として存在しても OS 既定が TLS1.0 のままになる環境があるため、
     # 「存在するから使う」で終わらせず、失敗時に TLS 1.2 へ上がることを確認する。
     if tls_src.count("CallStreamOnce") >= 2 and tls_src.count("CallOnceInternal") >= 2:

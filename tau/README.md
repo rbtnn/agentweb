@@ -184,16 +184,13 @@ TLS 1.2 以上を要求する API（OpenAI 系・DeepSeek 系など）で次の�
 SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした
 ```
 
-`ApplyTls()` が**二段構え**で設定します。
+`ApplyTls()` が**三段構え**で設定し、失敗するたびに一段上げて再試行します。
 
 | 段 | 設定 | 内容 |
 |---|---|---|
-| 第 1 段 | `SecurityProtocolType.SystemDefault`（値 0） | OS に最適なバージョンを選ばせる |
-| 第 2 段 | `Tls12`（+ `Tls13` があれば併用） | TLS 1.2 以上を明示する |
-
-**重要な注意**：`SystemDefault` は列挙値としては存在しますが（値 `0`）、
-**.NET Framework 4.6.1 以前をターゲットにしていると OS 既定が使われず TLS 1.0 のまま**になることがあります。
-そのため「存在するから使う」で終わらせず、**TLS ハンドシェイクに失敗したら第 2 段へ上がって 1 度だけ再試行**します。
+| 第 0 段 | `SecurityProtocolType.SystemDefault`（値 0） | OS に最適なバージョンを選ばせる |
+| 第 1 段 | `Tls12`（**単独**） | TLS 1.2 を明示する |
+| 第 2 段 | `SystemDefault`（最後の手段） | 古い TLS しか使えないサーバ・プロキシ向け |
 
 ```
 > hi
@@ -201,9 +198,33 @@ SSL/TLS のセキュリティで保護されているチャネルを作成でき
 再試行で成功
 ```
 
-- `SecureChannelFailure`、または内部例外が TLS/SslStream 系なら「TLS 失敗」と判定します
-- 証明書の問題（`TrustFailure`）は再試行しても直らないため対象外です
-- 再試行は**1 度だけ**（無限ループを防ぐため）
+### つまずきやすい点
+
+**`SystemDefault` は「使える」とは限りません。** 列挙値としては存在しますが（値 `0`）、
+**.NET Framework 4.6.1 以前をターゲットにしていると OS 既定が使われず TLS 1.0 のまま**になります。
+そのため「存在するから使う」で終わらせず、失敗したら次の段へ上げます。
+
+**`Tls12` に `Tls13` を OR で混ぜてはいけません。**
+OS の Schannel 設定や .NET のバージョンで有効になっていないプロトコルを要求すると、
+ハンドシェイク時に次のエラーになります。
+
+```
+指定された値は 'SslProtocolType' 列挙で有効ではありません。パラメーター名:sslProtocolType
+```
+
+TLS 1.2 は Windows 7 以降で必ず使えるため、**単独指定**が最も安全です。
+
+### TLS 失敗の判定
+
+次のいずれかを「TLS の設定不備」とみなし、一段上げて再試行します。
+
+- `WebExceptionStatus.SecureChannelFailure`
+- 内部例外が TLS / SslStream / Authentication 系
+- 内部例外が `ArgumentException` で、メッセージに `SslProtocolType` を含む
+  （無効なプロトコルを要求したときの実際の症状）
+
+証明書の問題（`TrustFailure`）は再試行しても直らないため**対象外**です。
+再試行は段の上限（2）までで、無限ループにはなりません。
 
 この設定は **LLM 呼び出し**と **`curl` ツール**の両方に適用されます。
 
@@ -269,8 +290,10 @@ python3 test_tau.py
 | 再開 | `--session` で続きから開けるか（LLM を呼ばないか） |
 | コマンド | `/model` `/tools` が効き、設定に保存されるか |
 | エラー | API エラーで落ちずに表示して続行するか |
-| TLS | `SystemDefault` → `Tls12` の二段構えか |
-| TLS 失敗 | `SecureChannelFailure` を検出して一段上げるか |
+| TLS | `SystemDefault` → `Tls12` → `SystemDefault` の三段構えか |
+| TLS 単独 | `Tls12` に `Tls13` を混ぜていないか |
+| TLS 失敗 | `SecureChannelFailure` / `SslProtocolType` エラーを検出するか |
+| TLS 除外 | 証明書エラー（`TrustFailure`）は再試行しないか |
 | TLS 再試行 | ストリーミング/非ストリーミングの両方で再試行するか |
 | TLS 適用 | LLM 呼び出しと `curl` の両方で設定しているか |
 | HTTP エラー | ステータスコードとレスポンス本文が表示されるか |
