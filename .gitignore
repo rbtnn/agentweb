@@ -19,3 +19,6 @@ agentweb.log
 # Python
 __pycache__/
 *.pyc
+
+# tau (コンソール版)
+tau/tau.exe
