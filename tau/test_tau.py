@@ -389,16 +389,30 @@ def main():
         bad("/new が同じセッションを開き直しています: %r" % ids)
 
     # ---- 6c-2. 日本語の入出力 ----
-    # Console.InputEncoding を UTF-8 に強制すると Windows で日本語が
-    # NUL 文字に化けるため、入力エンコーディングは変更しないこと。
-    if "Console.InputEncoding = Encoding.UTF8" not in tls_src:
-        ok("Console.InputEncoding を UTF-8 に変更していません")
+    # 入出力のコードページを食い違わせると Windows で日本語が NUL に化ける。
+    # そのため SetupConsoleEncoding() で入出力を揃え、
+    # リダイレクト時は入力に触らないこと。
+    if "SetupConsoleEncoding" in tls_src:
+        ok("コンソールのエンコーディングを一括設定しています")
     else:
-        bad("Console.InputEncoding を UTF-8 にしており、日本語入力が壊れます")
+        bad("SetupConsoleEncoding がありません")
+    if "IsInputRedirected" in tls_src and "return;" in tls_src:
+        ok("入力リダイレクト時はエンコーディングを変更しません")
+    else:
+        bad("リダイレクト時の考慮がありません")
     if "SanitizeInput" in tls_src:
         ok("入力から NUL 文字を取り除く保険があります")
     else:
         bad("NUL 文字の除去処理がありません")
+    # NUL で入力が失われたときに黙って再入力待ちにしないこと
+    if "CountNul" in tls_src and "input was lost" in tls_src:
+        ok("入力が NUL で失われたときに警告します")
+    else:
+        bad("入力消失時の警告がありません")
+    if "character(s) of the input became NUL" in tls_src:
+        ok("一部だけ NUL に化けた場合も警告します")
+    else:
+        bad("部分的な NUL 化の警告がありません")
 
     # 新しいセッションで日本語を送る(履歴の影響を受けないようにする)。
     # tau は入力そのものをエコーしないので、LLM へ渡った内容で確認する。
@@ -433,6 +447,36 @@ def main():
             bad("日本語が正しく保存されていません: %r" % users)
     else:
         bad("セッションがありません")
+
+    # ---- 6c-3. NUL で入力が失われたら警告する ----
+    # Windows で入力エンコーディングが合わないと日本語が NUL になり、
+    # 以前は黙って再入力待ちになって「応答が返らない」ように見えた。
+    out = run_tau("\x00\x00\x00\x00\n/exit\n")
+    if "input was lost" in out:
+        ok("入力が NUL で失われたときに警告します")
+    else:
+        bad("NUL で入力が失われても警告しません: " + out[-400:])
+    if "input encoding" in out:
+        ok("警告時に現在の入力エンコーディングを表示します")
+    else:
+        bad("入力エンコーディングが表示されません")
+
+    # 一部だけ NUL の場合も警告し、残りは送信する
+    Mock.calls = []
+    out = run_tau("\x00abc\n/exit\n")
+    if "became NUL" in out:
+        ok("一部だけ NUL に化けた場合も警告します")
+    else:
+        bad("部分的な NUL 化の警告がありません: " + out[-400:])
+    sent = ""
+    if Mock.calls:
+        for m in Mock.calls[-1].get("messages", []):
+            if m.get("role") == "user":
+                sent = m.get("content") or ""
+    if sent == "abc":
+        ok("NUL を除いた残りの文字は送信されます")
+    else:
+        bad("残りの文字が送信されていません: %r" % sent)
 
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)

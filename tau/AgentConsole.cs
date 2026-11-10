@@ -25,20 +25,14 @@ namespace Tau
     {
         static void Main(string[] args)
         {
-            // 出力だけ UTF-8 にする(日本語が化けないようにするため)。
+            // コンソールのエンコーディングを設定する。
             //
-            // Console.InputEncoding は変更しない。
-            // InputEncoding は「キーボードの文字コード(256 種)を文字に変換する」
-            // ためのもので、コンソールの入力コードページを UTF-8 に変えるものでは
-            // ない。Windows のコンソールが CP932 のまま UTF-8 を指定すると、
-            // 日本語入力が NUL 文字(\u0000)に化けてしまう。
-            // 入力はコンソール既定(Windows なら CP932)のまま読み取る。
-            try { Console.OutputEncoding = Encoding.UTF8; }
-            catch { }
-
-            // 念のため、入力コードページが UTF-8 になっていたら既定に戻す。
-            // (別のプログラムが chcp 65001 にした状態で起動された場合など)
-            TryFixInputEncoding();
+            // 重要: 出力だけ UTF-8 にして入力が CP932 のままだと、Windows では
+            // コンソールの入出力コードページが食い違い、日本語入力が NUL 文字
+            // (\u0000) に化けることがある(dotnet/runtime#43295)。
+            // 入出力を同じコードページに揃えるのが安全なので、
+            // 対話コンソールのときは両方 UTF-8 にする。
+            SetupConsoleEncoding();
 
             string configPath = "";
             string sessionArg = "";
@@ -70,24 +64,65 @@ namespace Tau
 
         // 入力エンコーディングを「変更しない」のが原則だが、起動時点で UTF-8 に
         // なっていると日本語入力が壊れるため、コンソール既定に戻す。
-        static void TryFixInputEncoding()
+        // コンソールの入出力エンコーディングを設定する。
+        //
+        // Windows では入出力のコードページが食い違うと日本語入力が壊れるため、
+        // 対話コンソールのときは両方 UTF-8 に揃える。
+        // ただし、UTF-8 入力を実際に読めるか確認し、読めない環境では
+        // 従来どおりコンソール既定(CP932)で入力する。
+        static void SetupConsoleEncoding()
         {
             try
             {
-                if (Console.IsInputRedirected) return;   // リダイレクト時は触らない
-                Encoding cur = Console.InputEncoding;
-                if (cur != null && cur.CodePage == 65001)   // UTF-8
-                {
-                    // Windows では既定(CP932 等)に戻す。Unix 系は UTF-8 が既定なので
-                    // そのまま(戻すと逆に壊れる)。
-                    if (Path.DirectorySeparatorChar == '\\')
-                    {
-                        try { Console.InputEncoding = Encoding.Default; }
-                        catch { }
-                    }
-                }
+                Console.OutputEncoding = Encoding.UTF8;
             }
             catch { }
+
+            // 入力がリダイレクトされている場合は触らない
+            // (パイプやファイルからの入力はそのまま読める)
+            bool redirected = false;
+            try { redirected = Console.IsInputRedirected; }
+            catch { }
+            if (redirected) return;
+
+            if (Path.DirectorySeparatorChar != '\\') return;   // Windows のみ
+
+            try
+            {
+                Encoding cur = Console.InputEncoding;
+                if (cur != null && cur.CodePage == 65001) return;   // すでに UTF-8
+
+                // 入力も UTF-8 に揃える。ここで失敗する/読めなくなる環境もあるため、
+                // 設定できなければ元のまま(CP932)で使う。
+                Console.InputEncoding = Encoding.UTF8;
+            }
+            catch
+            {
+                // UTF-8 入力を設定できなければ、元のエンコーディングのままにする
+                try { Console.InputEncoding = Encoding.Default; } catch { }
+            }
+        }
+
+        // 文字列中の NUL 文字の個数を数える
+        public static int CountNul(string s)
+        {
+            if (s == null) return 0;
+            int n = 0;
+            for (int i = 0; i < s.Length; i++)
+                if (s[i] == '\0') n++;
+            return n;
+        }
+
+        // 現在の入力エンコーディングを表示用に返す(診断用)
+        public static string SafeInputEncoding()
+        {
+            try
+            {
+                Encoding e = Console.InputEncoding;
+                return e.WebName + " (CP" + e.CodePage + ")"
+                    + (Console.IsInputRedirected ? ", redirected" : "");
+            }
+            catch (Exception ex) { return "unknown (" + ex.Message + ")"; }
         }
 
         // 入力文字列から NUL 文字を取り除く。
@@ -2595,8 +2630,35 @@ namespace Tau
                 catch { break; }
 
                 if (line == null) break;   // Ctrl+D / EOF
+
+                // 入力が NUL 文字に化けていないか確認する。
+                // Windows のコンソールで入力エンコーディングが合っていないと、
+                // 日本語が NUL になり、SanitizeInput で全て消えてしまう。
+                // そのまま黙って再入力待ちにすると「応答が返らない」ように見えるため、
+                // 何が起きたかを表示する。
+                int nulCount = Program.CountNul(line);
+                if (nulCount > 0 && nulCount >= line.Length)
+                {
+                    ConsoleUi.Danger("⚠ The input was lost (all " + line.Length
+                        + " characters became NUL).\n");
+                    ConsoleUi.Dim("  The console input encoding does not match.\n");
+                    ConsoleUi.Dim("  Try one of the following:\n");
+                    ConsoleUi.Dim("   - Run `chcp 65001` before starting tau (or run it in Windows Terminal)\n");
+                    ConsoleUi.Dim("   - Set TAU_DEBUG=1 and check the reported input encoding\n");
+                    ConsoleUi.Dim("   - Paste the text from a file:  tau --session <id> < input.txt\n");
+                    ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
+                    continue;
+                }
+
+                if (nulCount > 0)
+                {
+                    // 一部だけ NUL に化けた場合も、欠落を伝える
+                    ConsoleUi.Danger("⚠ " + nulCount + " character(s) of the input became NUL and were dropped.\n");
+                    ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
+                }
+
                 line = Program.SanitizeInput(line).Trim();
-                if (line.Length == 0) continue;
+                if (line.Length == 0) continue;   // 空行は何もしない
 
                 if (line.StartsWith("/"))
                 {
@@ -3052,6 +3114,13 @@ namespace Tau
 
             Console.WriteLine("  [environment]");
             Console.WriteLine("    " + LlmClient.DescribeEnvironment());
+            Console.WriteLine("    input encoding : " + Program.SafeInputEncoding());
+            try
+            {
+                Console.WriteLine("    output encoding: " + Console.OutputEncoding.WebName
+                    + " (CP" + Console.OutputEncoding.CodePage + ")");
+            }
+            catch { }
             Console.WriteLine();
 
             Console.WriteLine("  [settings]");

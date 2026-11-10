@@ -240,18 +240,44 @@ TAU_CONFIG
 
 ### 日本語の入出力
 
-出力は UTF-8 に設定するため、日本語が化けずに表示されます。
+`SetupConsoleEncoding()` がコンソールの入出力エンコーディングを設定します。
 
-**`Console.InputEncoding` は変更しません。** これは「キーボードの文字コード（256 種）を
-文字に変換する」ためのもので、コンソールの入力コードページを UTF-8 に変えるものでは
-ありません。Windows のコンソールが CP932 のまま UTF-8 を指定すると、
-**日本語入力が NUL 文字（`\u0000`）に化けてしまいます**。
+**入出力のコードページを食い違わせてはいけません。**
+Windows で出力だけ UTF-8 にすると入出力のコードページが食い違い、
+**日本語入力が NUL 文字（`\u0000`）に化けます**（dotnet/runtime#43295）。
 
-> 症状: 日本語を送るとセッションファイル上で `\u0000` になり、送信できない。
+そのため `tau` は:
 
-そのため `tau` は入力を**コンソール既定のまま**読み取ります。
-保険として、入力文字列に NUL 文字が混入しても取り除いてから送信します
-（`SanitizeInput()`）。
+- 出力を UTF-8 に設定（日本語が化けない）
+- **対話コンソールなら入力も UTF-8 に揃える**
+- **入力がリダイレクトされている場合は入力に触らない**（パイプ・ファイル入力はそのまま読める）
+
+#### 入力が NUL に化けた場合
+
+以前は NUL を黙って除去した結果、**入力が空になり何も表示せず再入力待ち**になって
+「応答が返らない」ように見えることがありました。
+現在はその場合に警告と対処方法を表示します。
+
+```
+> ⚠ The input was lost (all 30 characters became NUL).
+  The console input encoding does not match.
+  Try one of the following:
+   - Run `chcp 65001` before starting tau (or run it in Windows Terminal)
+   - Set TAU_DEBUG=1 and check the reported input encoding
+   - Paste the text from a file:  tau --session <id> < input.txt
+  · input encoding: utf-8 (CP65001)
+```
+
+一部だけ NUL に化けた場合は、**欠落した文字数を表示**したうえで、
+残りの文字を送信します。
+
+`tau --diag` でも現在の入出力エンコーディングを確認できます。
+
+```
+  [environment]
+    input encoding : utf-8 (CP65001)
+    output encoding: utf-8 (CP65001)
+```
 
 ### ストリーミング表示
 
@@ -435,6 +461,8 @@ python3 test_tau.py
 | `/clear` | 履歴だけ消え、セッション(ID・タイトル)は残るか |
 | `/clear` 中止 | `n` でクリアされないか |
 | NUL 対策 | 入力の NUL 文字を取り除くか |
+| 入力消失 | NUL で全滅したときに警告するか |
+| 一部 NUL | 欠落を伝え、残りを送信するか |
 | `/model` | 任意のモデル名を受け付けるか |
 | セッションの分離 | `%APPDATA%\tau\sessions` に保存し、agentweb 側を汚さないか |
 | セッション形式 | `agentweb` と同じキーで保存されるか |
