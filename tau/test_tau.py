@@ -140,6 +140,7 @@ class MockTruncate(BaseHTTPRequestHandler):
 
 # --------------------------------------------------------------------------
 def main():
+    tls_src = open(SRC, encoding="utf-8").read()   # ソースの静的チェック用
     exe = os.path.join(tempfile.mkdtemp(prefix="tau_build_"), "tau.exe")
     print("=== tau 実行時回帰テスト ===")
     rc = subprocess.run(["mcs", "-langversion:5", "-out:" + exe, SRC],
@@ -387,6 +388,52 @@ def main():
     else:
         bad("/new が同じセッションを開き直しています: %r" % ids)
 
+    # ---- 6c-2. 日本語の入出力 ----
+    # Console.InputEncoding を UTF-8 に強制すると Windows で日本語が
+    # NUL 文字に化けるため、入力エンコーディングは変更しないこと。
+    if "Console.InputEncoding = Encoding.UTF8" not in tls_src:
+        ok("Console.InputEncoding を UTF-8 に変更していません")
+    else:
+        bad("Console.InputEncoding を UTF-8 にしており、日本語入力が壊れます")
+    if "SanitizeInput" in tls_src:
+        ok("入力から NUL 文字を取り除く保険があります")
+    else:
+        bad("NUL 文字の除去処理がありません")
+
+    # 新しいセッションで日本語を送る(履歴の影響を受けないようにする)。
+    # tau は入力そのものをエコーしないので、LLM へ渡った内容で確認する。
+    Mock.calls = []
+    out = run_tau("/new\n日本語のテストです\n/exit\n")
+    sent_jp = ""
+    if Mock.calls:
+        for m in Mock.calls[-1].get("messages", []):
+            if m.get("role") == "user":
+                sent_jp = m.get("content") or ""
+    if sent_jp == "日本語のテストです":
+        ok("日本語のメッセージがそのまま LLM へ渡ります")
+    else:
+        bad("LLM へ渡った日本語が想定と違います: %r" % sent_jp)
+    # 直近のセッションに日本語がそのまま保存されていること
+    jp_files = sorted(
+        (os.path.join(sdir, f) for f in os.listdir(sdir)
+         if f.endswith(".json") and not f.startswith("_")),
+        key=os.path.getmtime)
+    if jp_files:
+        raw = open(jp_files[-1], encoding="utf-8-sig").read()
+        if "\\u0000" not in raw and "\x00" not in raw:
+            ok("セッションに NUL 文字(\\u0000)が保存されません")
+        else:
+            bad("セッションに NUL 文字が保存されています")
+        data = json.loads(raw)
+        users = [m.get("content") for m in data.get("messages", [])
+                 if m.get("role") == "user"]
+        if users and "日本語" in (users[-1] or ""):
+            ok("日本語がそのままセッションに保存されます")
+        else:
+            bad("日本語が正しく保存されていません: %r" % users)
+    else:
+        bad("セッションがありません")
+
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
     multi_port = multi_srv.server_address[1]
@@ -578,7 +625,6 @@ def main():
     # TLS 1.2 以上を要求する API で
     #   「SSL/TLS のセキュリティで保護されているチャネルを作成できませんでした」
     # になる。EnsureTls() が SystemDefault / Tls12 以上を設定していることを確認する。
-    tls_src = open(SRC, encoding="utf-8").read()
     if "ApplyTls" in tls_src and "ServicePointManager.SecurityProtocol" in tls_src:
         ok("TLS バージョンを設定する処理(ApplyTls)があります")
     else:

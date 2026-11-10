@@ -25,10 +25,20 @@ namespace Tau
     {
         static void Main(string[] args)
         {
+            // 出力だけ UTF-8 にする(日本語が化けないようにするため)。
+            //
+            // Console.InputEncoding は変更しない。
+            // InputEncoding は「キーボードの文字コード(256 種)を文字に変換する」
+            // ためのもので、コンソールの入力コードページを UTF-8 に変えるものでは
+            // ない。Windows のコンソールが CP932 のまま UTF-8 を指定すると、
+            // 日本語入力が NUL 文字(\u0000)に化けてしまう。
+            // 入力はコンソール既定(Windows なら CP932)のまま読み取る。
             try { Console.OutputEncoding = Encoding.UTF8; }
             catch { }
-            try { Console.InputEncoding = Encoding.UTF8; }
-            catch { }
+
+            // 念のため、入力コードページが UTF-8 になっていたら既定に戻す。
+            // (別のプログラムが chcp 65001 にした状態で起動された場合など)
+            TryFixInputEncoding();
 
             string configPath = "";
             string sessionArg = "";
@@ -56,6 +66,40 @@ namespace Tau
 
             Chat chat = new Chat(cfg);
             chat.Run(sessionArg);
+        }
+
+        // 入力エンコーディングを「変更しない」のが原則だが、起動時点で UTF-8 に
+        // なっていると日本語入力が壊れるため、コンソール既定に戻す。
+        static void TryFixInputEncoding()
+        {
+            try
+            {
+                if (Console.IsInputRedirected) return;   // リダイレクト時は触らない
+                Encoding cur = Console.InputEncoding;
+                if (cur != null && cur.CodePage == 65001)   // UTF-8
+                {
+                    // Windows では既定(CP932 等)に戻す。Unix 系は UTF-8 が既定なので
+                    // そのまま(戻すと逆に壊れる)。
+                    if (Path.DirectorySeparatorChar == '\\')
+                    {
+                        try { Console.InputEncoding = Encoding.Default; }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 入力文字列から NUL 文字を取り除く。
+        // コンソール設定が原因で \u0000 が混入しても、セッションを壊さないための保険。
+        public static string SanitizeInput(string s)
+        {
+            if (s == null) return "";
+            if (s.IndexOf('\0') < 0) return s;
+            StringBuilder sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+                if (s[i] != '\0') sb.Append(s[i]);
+            return sb.ToString();
         }
 
         internal static void PrintHelp()
@@ -2543,7 +2587,7 @@ namespace Tau
                 catch { break; }
 
                 if (line == null) break;   // Ctrl+D / EOF
-                line = line.Trim();
+                line = Program.SanitizeInput(line).Trim();
                 if (line.Length == 0) continue;
 
                 if (line.StartsWith("/"))
@@ -2767,7 +2811,7 @@ namespace Tau
             string ans;
             try { ans = Console.ReadLine(); }
             catch { ans = null; }
-            ans = (ans == null) ? "" : ans.Trim().ToLowerInvariant();
+            ans = Program.SanitizeInput(ans).Trim().ToLowerInvariant();
             if (ans != "y" && ans != "yes")
             {
                 ConsoleUi.Dim("  中止しました\n");
@@ -3350,9 +3394,7 @@ namespace Tau
             }
             Console.WriteLine();
             ConsoleUi.Dim("  変更する項目の番号を入力 (Enter で中止): ");
-            string pick = Console.ReadLine();
-            if (pick == null) return;
-            pick = pick.Trim();
+            string pick = Program.SanitizeInput(Console.ReadLine()).Trim();
             if (pick.Length == 0) { ConsoleUi.Dim("  中止しました\n"); return; }
 
             int idx;
@@ -3376,6 +3418,7 @@ namespace Tau
                 {
                     string ln = Console.ReadLine();
                     if (ln == null) break;
+                    ln = Program.SanitizeInput(ln);
                     if (ln.Length == 0) break;
                     if (sb.Length > 0) sb.Append('\n');
                     sb.Append(ln);
@@ -3386,9 +3429,8 @@ namespace Tau
             else
             {
                 ConsoleUi.Dim("  新しい値を入力 (Enter で中止): ");
-                value = Console.ReadLine();
-                if (value == null) return;
-                if (value.Trim().Length == 0 && field.Kind != "string" && field.Kind != "secret")
+                value = Program.SanitizeInput(Console.ReadLine());
+                if (value.Length == 0 && field.Kind != "string" && field.Kind != "secret")
                 {
                     ConsoleUi.Dim("  中止しました\n");
                     return;
