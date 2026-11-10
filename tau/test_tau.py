@@ -730,6 +730,18 @@ def main():
     else:
         bad("TLS 設定の適用箇所が足りません: %d" % tls_src.count("ApplyTls()"))
 
+    # ---- 7a. 未使用の定数が無いこと ----
+    # KIND_* は出力の種類。使われていない定数があるとコンパイラ警告になる。
+    for name in ("KIND_NONE", "KIND_THINK", "KIND_CONTENT"):
+        if tls_src.count(name) >= 2:
+            ok("%s が使用されています" % name)
+        else:
+            bad("%s が宣言だけで使われていません" % name)
+    if "KIND_TOOL" not in tls_src:
+        ok("未使用の KIND_TOOL は削除されています")
+    else:
+        bad("未使用の KIND_TOOL が残っています")
+
     # ---- 7b. デバッグ機能 ----
     if "--diag" in tls_src and "class Diagnostics" in tls_src:
         ok("接続診断(--diag)が実装されています")

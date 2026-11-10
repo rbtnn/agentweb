@@ -2935,8 +2935,9 @@ namespace Tau
             AutoTitle(ctx, userMessage);
 
             // 出力の種類。種類が変わったら改行を入れてから表示する。
-            //   0 = なし, 1 = 思考, 2 = ツール実行, 3 = 本文
-            const int KIND_NONE = 0, KIND_THINK = 1, KIND_TOOL = 2, KIND_CONTENT = 3;
+            //   0 = なし, 1 = 思考, 2 = 本文
+            // ツール実行は単独の行として出力し、そのあとは「なし」に戻す。
+            const int KIND_NONE = 0, KIND_THINK = 1, KIND_CONTENT = 2;
             int kind = KIND_NONE;
 
             Console.WriteLine();
