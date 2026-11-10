@@ -284,7 +284,7 @@ def main():
     # ---- 3. 続きから再開できる ----
     Mock.calls = []
     out = run_tau("/exit\n", args=["--session", sid])
-    if "これまでの会話" in out and "完了です" in out:
+    if "conversation so far" in out and "完了です" in out:
         ok("--session で続きから再開できます")
     else:
         bad("再開できません: " + out[-400:])
@@ -306,7 +306,7 @@ def main():
         ok("/model でモデルを切り替えられます")
     else:
         bad("/model が効いていません: " + out[-400:])
-    if "ツール実行: off" in out and "ツール実行: on" in out:
+    if "Tools: off" in out and "Tools: on" in out:
         ok("/tools でツールの on/off を切り替えられます")
     else:
         bad("/tools が効いていません")
@@ -338,7 +338,7 @@ def main():
         json.dump({"llmApiUrl": "http://127.0.0.1:9/v1/chat/completions",
                    "llmApiKey": "k", "model": "m", "allowTools": False}, f)
     out = run_tau("こんにちは\n/exit\n", args=["--config", bad_cfg])
-    if "エラー" in out and "終了します" in out:
+    if "Error" in out and "Bye" in out:
         ok("API エラー時も落ちずにエラー表示して続行します")
     else:
         bad("API エラー時の挙動が想定と違います: " + out[-400:])
@@ -373,7 +373,7 @@ def main():
                    "llmApiKey": "k", "model": "m", "allowTools": False,
                    "useSystemProxy": False}, f)
     out = run_tau("hi\n/exit\n", args=["--config", tr_cfg])
-    if "切断" in out:
+    if "cut off" in out or "connection was lost" in out:
         ok("途中で切断された応答はエラーとして報告されます")
     else:
         bad("切断が検出されません(途中までの本文を確定してしまう): " + out[-400:])
@@ -382,7 +382,7 @@ def main():
     # ---- 6d. /new は必ず別のセッションになる ----
     out = run_tau("/new\n/new\n/exit\n")
     ids = [ln.split(":")[-1].strip() for ln in out.splitlines()
-           if "新しいセッションを開始しました" in ln]
+           if "Started a new session" in ln]
     if len(ids) == 2 and ids[0] != ids[1]:
         ok("/new で毎回異なるセッションが作られます")
     else:
@@ -446,11 +446,11 @@ def main():
     out = run_tau("テスト\n/exit\n", args=["--config", multi_cfg])
     multi_srv.shutdown(); multi_srv.server_close()
 
-    # 「[思考] ...」「▶ ツール実行: ...」「最終的な回答です。」が
+    # "[thinking] ..." "▶ Tool: ..." "最終的な回答です。" が
     # それぞれ独立した行になっていること(前の出力に連結していないこと)
     lines = out.splitlines()
-    think_lines = [l for l in lines if "[思考]" in l]
-    tool_lines = [l for l in lines if "▶ ツール実行:" in l]
+    think_lines = [l for l in lines if "[thinking]" in l]
+    tool_lines = [l for l in lines if "▶ Tool:" in l]
     reply_lines = [l for l in lines if "最終的な回答です。" in l]
     if len(think_lines) >= 2 and len(tool_lines) >= 2 and reply_lines:
         ok("思考・ツール実行・本文がそれぞれ表示されます")
@@ -460,16 +460,16 @@ def main():
 
     # 1 行の中に複数の種類が混ざっていないこと
     mixed = [l for l in lines
-             if ("[思考]" in l and "▶" in l)
-             or ("[思考]" in l and "最終的な回答です。" in l)
+             if ("[thinking]" in l and "▶" in l)
+             or ("[thinking]" in l and "最終的な回答です。" in l)
              or ("▶" in l and "最終的な回答です。" in l)]
     if not mixed:
         ok("種類の違う出力が同じ行に連結されません")
     else:
         bad("改行されず連結しています: %r" % mixed[:3])
 
-    # 本文は「[思考]」や「▶」の行に続けて書かれていないこと
-    if reply_lines and ("[思考]" not in reply_lines[0] and "▶" not in reply_lines[0]):
+    # 本文は "[thinking]" や "▶" の行に続けて書かれていないこと
+    if reply_lines and ("[thinking]" not in reply_lines[0] and "▶" not in reply_lines[0]):
         ok("本文は単独の行から始まります")
     else:
         bad("本文が前の出力に連結しています: %r" % reply_lines[:2])
@@ -523,13 +523,13 @@ def main():
         bad("未知のキーが失われました: %r" % lg.get("myCustomKey"))
 
     out = run_tau("/set bogus 1\n/set contextWindow abc\n/exit\n")
-    if "不明な設定項目" in out and "値が不正" in out:
+    if "Unknown setting" in out and "Invalid value" in out:
         ok("/set は不正な key / 値を拒否します")
     else:
         bad("/set の入力チェックがありません")
     # models オプションは廃止した
     out = run_tau("/set models a,b\n/exit\n")
-    if "不明な設定項目" in out:
+    if "Unknown setting" in out:
         ok("models オプションは存在しません(廃止済み)")
     else:
         bad("models オプションがまだ残っています: " + out[-400:])
@@ -560,7 +560,7 @@ def main():
 
     # ---- 6f. セッションの削除 ----
     out = run_tau("/sessions\n/exit\n")
-    if "削除は /delete" in out:
+    if "/delete" in out and "current session" in out:
         ok("/sessions に削除方法の案内が出ます")
     else:
         bad("/sessions に案内がありません: " + out[-300:])
@@ -576,7 +576,7 @@ def main():
 
     out = run_tau("/delete 1\nn\n/exit\n")
     after = [f for f in os.listdir(sdir) if f.endswith(".json") and not f.startswith("_")]
-    if "中止しました" in out and len(after) == len(before):
+    if "Cancelled" in out and len(after) == len(before):
         ok("/delete で n を選ぶと削除されません")
     else:
         bad("中止が効いていません: %r -> %r" % (before, after))
@@ -602,23 +602,76 @@ def main():
         return 1
     out = run_tau("/delete " + target + "\ny\n/exit\n")
     after = [f for f in os.listdir(sdir) if f.endswith(".json") and not f.startswith("_")]
-    if "削除しました" in out and target not in [f[:-5] for f in after] \
+    if "Deleted" in out and target not in [f[:-5] for f in after] \
        and len(after) == len(before) - 1:
         ok("/delete で y を選ぶとセッションが削除されます")
     else:
         bad("削除が効いていません: target=%r %d -> %d" % (target, len(before), len(after)))
 
     out = run_tau("/delete\n/exit\n")
-    if "指定してください" in out:
+    if "Specify the session to delete" in out:
         ok("/delete を引数なしで実行すると使い方を表示します")
     else:
         bad("/delete の引数チェックがありません")
 
     out = run_tau("/delete 99\n/exit\n")
-    if "番号のセッションはありません" in out:
+    if "No session with that number" in out:
         ok("/delete は存在しない番号を拒否します")
     else:
         bad("/delete の番号チェックがありません: " + out[-300:])
+
+    # ---- 6g. /clear はセッションの内容をクリアする ----
+    run_tau("/new\nclear-test\n/exit\n")   # 会話を 1 つ作る
+    clr_files = sorted(
+        (os.path.join(sdir, f) for f in os.listdir(sdir)
+         if f.endswith(".json") and not f.startswith("_")),
+        key=os.path.getmtime)
+    if not clr_files:
+        bad("/clear のテスト用セッションがありません")
+        return 1
+    clr_file = clr_files[-1]
+    with open(clr_file, encoding="utf-8-sig") as f:
+        before_msgs = len(json.load(f).get("messages", []))
+    if before_msgs > 0:
+        ok("/clear のテスト用セッションに会話があります (%d 件)" % before_msgs)
+    else:
+        bad("/clear のテスト用セッションが空です")
+
+    # n を選ぶとクリアされない
+    out = run_tau("/clear\nn\n/exit\n")
+    with open(clr_file, encoding="utf-8-sig") as f:
+        after_n = len(json.load(f).get("messages", []))
+    if "Cancelled" in out and after_n == before_msgs:
+        ok("/clear で n を選ぶとクリアされません")
+    else:
+        bad("/clear の中止が効いていません: %d -> %d" % (before_msgs, after_n))
+
+    # y を選ぶと履歴が消える
+    out = run_tau("/clear\ny\n/exit\n")
+    with open(clr_file, encoding="utf-8-sig") as f:
+        data = json.load(f)
+    if "Cleared" in out and len(data.get("messages", [])) == 0:
+        ok("/clear でセッションの履歴がクリアされます")
+    else:
+        bad("/clear が効いていません: %r" % data.get("messages"))
+    if data.get("summary") == "" and data.get("contextStart") == 0:
+        ok("/clear で要約とコンテキスト位置もリセットされます")
+    else:
+        bad("/clear が要約/位置をリセットしていません: %r/%r"
+            % (data.get("summary"), data.get("contextStart")))
+    # セッション自体(ID・タイトル)は残る
+    if data.get("id") and data.get("title"):
+        ok("/clear はセッション自体(ID・タイトル)を残します")
+    else:
+        bad("/clear でセッションが失われました: %r" % {k: data.get(k)
+            for k in ("id", "title")})
+
+    # 空のセッションで /clear しても安全
+    out = run_tau("/clear\n/exit\n")
+    if "no messages yet" in out:
+        ok("空のセッションで /clear しても安全です")
+    else:
+        bad("/clear の空セッション処理が想定と違います: " + out[-300:])
 
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
@@ -704,7 +757,7 @@ def main():
 
     # ---- 9. --diag が動作する ----
     out = run_tau("", args=["--diag"], timeout=120)
-    if "接続診断" in out and "TLS の接続試験" in out:
+    if "connection diagnostic" in out and "TLS handshake test" in out:
         ok("--diag が接続診断を実行します")
     else:
         bad("--diag が動作しません: " + out[-400:])

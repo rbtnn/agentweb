@@ -104,29 +104,29 @@ namespace Tau
 
         internal static void PrintHelp()
         {
-            Console.WriteLine("tau - コンソール上で動く AI エージェント");
+            Console.WriteLine("tau - AI agent that runs in the console");
             Console.WriteLine();
-            Console.WriteLine("使用法: tau.exe [オプション]");
-            Console.WriteLine("  --config <path>    設定ファイル(tau.json)のパス");
-            Console.WriteLine("  --session <id>     既存セッションを開いて続きから対話する");
-            Console.WriteLine("  --list             保存済みセッションの一覧を表示して終了");
-            Console.WriteLine("  --diag             接続診断(TLS/HTTP)を実行して終了");
-            Console.WriteLine("  --debug            デバッグ出力を有効にする (TAU_DEBUG=1 と同じ)");
-            Console.WriteLine("  --help, -h, /?     このヘルプを表示");
+            Console.WriteLine("Usage: tau.exe [options]");
+            Console.WriteLine("  --config <path>    Path to the config file (tau.json)");
+            Console.WriteLine("  --session <id>     Open an existing session and continue it");
+            Console.WriteLine("  --list             List saved sessions and exit");
+            Console.WriteLine("  --diag             Run a connection diagnostic (TLS/HTTP) and exit");
+            Console.WriteLine("  --debug            Enable debug output (same as TAU_DEBUG=1)");
+            Console.WriteLine("  --help, -h, /?     Show this help");
             Console.WriteLine();
-            Console.WriteLine("対話中に使えるコマンド:");
-            Console.WriteLine("  /help        ヘルプを表示");
-            Console.WriteLine("  /new         新しいセッションを開始");
-            Console.WriteLine("  /sessions    保存済みセッションの一覧");
-            Console.WriteLine("  /open <id>   指定したセッションを開く");
-            Console.WriteLine("  /delete <n>  セッションを削除 (番号は /sessions で確認)");
-            Console.WriteLine("  /config      現在の設定を表示");
-            Console.WriteLine("  /config edit 対話形式で設定を変更");
-            Console.WriteLine("  /set <k> <v> 設定を 1 項目だけ変更 (例: /set model gpt-4o)");
-            Console.WriteLine("  /model [名]  モデルの表示・切り替え");
-            Console.WriteLine("  /tools       ツール実行の on/off を切り替え");
-            Console.WriteLine("  /clear       画面を消す");
-            Console.WriteLine("  /exit, /quit 終了 (Ctrl+D でも終了)");
+            Console.WriteLine("Commands available while chatting:");
+            Console.WriteLine("  /help            Show this help");
+            Console.WriteLine("  /new             Start a new session");
+            Console.WriteLine("  /sessions        List saved sessions");
+            Console.WriteLine("  /open <id>       Open the given session");
+            Console.WriteLine("  /delete <n>      Delete a session (numbers come from /sessions)");
+            Console.WriteLine("  /clear           Clear the current session's history");
+            Console.WriteLine("  /config          Show the current settings");
+            Console.WriteLine("  /config edit     Edit settings interactively");
+            Console.WriteLine("  /set <k> <v>     Change a single setting (e.g. /set model gpt-4o)");
+            Console.WriteLine("  /model [name]    Show or switch the model");
+            Console.WriteLine("  /tools           Toggle tool execution on/off");
+            Console.WriteLine("  /exit, /quit     Exit (Ctrl+D also works)");
         }
 
         static void ListSessions(string configPath)
@@ -137,11 +137,11 @@ namespace Tau
             List<object> list = store.List();
             if (list.Count == 0)
             {
-                Console.WriteLine("保存済みセッションはありません。");
-                Console.WriteLine("  保存先: " + store.DataDir);
+                Console.WriteLine("No saved sessions.");
+                Console.WriteLine("  Location: " + store.DataDir);
                 return;
             }
-            Console.WriteLine("保存済みセッション (" + store.DataDir + ")");
+            Console.WriteLine("Saved sessions (" + store.DataDir + ")");
             Console.WriteLine();
             for (int i = 0; i < list.Count; i++)
             {
@@ -210,16 +210,16 @@ namespace Tau
 
 
             SystemPrompt = Env("AI_SYSTEM_PROMPT",
-                "あなたはコンソール上で動作する AI エージェントです。"
-                + " ユーザーの質問に日本語で簡潔に回答してください。"
-                + "\n\nこのプログラムは利用者のローカルマシン上で動作しており、"
-                + " あなたの指示で実際にツールを実行できます。"
-                + " ファイルの調査や操作、コマンドの実行が必要な依頼には、"
-                + " 積極的にツール(shell/read_file/write_file/list_dir)を使い、"
-                + " 自分で実際に確認・実行してから結果を報告してください。"
-                + " 危険・不可逆な操作を行う前にはユーザーに確認すること。"
-                + "\n出力はコンソールに表示されるため、Markdown の装飾は最小限にし、"
-                + " 読みやすいプレーンテキストで答えてください。");
+                "You are an AI agent that runs in the console."
+                + " Answer the user concisely."
+                + "\n\nThis program runs on the user's local machine, so you can actually"
+                + " run tools when instructed."
+                + " For requests that need investigating or changing files, or running commands,"
+                + " use the tools (shell/read_file/write_file/list_dir) and verify the result"
+                + " yourself before reporting back."
+                + " Ask the user before performing dangerous or irreversible operations."
+                + "\nOutput is shown in a terminal, so keep Markdown decoration minimal"
+                + " and reply in readable plain text.");
 
             ConfigPath = (configPathArg != null && configPathArg.Trim().Length > 0)
                 ? configPathArg.Trim()
@@ -275,7 +275,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[config] 設定ファイルの読み込みに失敗しました: " + ex.Message);
+                Console.WriteLine("[config] failed to load the config file: " + ex.Message);
             }
         }
 
@@ -359,7 +359,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[config] 保存に失敗しました: " + ex.Message);
+                Console.WriteLine("[config] failed to save: " + ex.Message);
             }
         }
 
@@ -740,14 +740,14 @@ namespace Tau
 
             Dictionary<string, object> s = new Dictionary<string, object>();
             s["id"] = Sanitize(id);
-            s["title"] = (title == null || title.Trim().Length == 0) ? "新規会話" : title;
+            s["title"] = (title == null || title.Trim().Length == 0) ? "New conversation" : title;
             s["createdAt"] = createdAt;
             s["updatedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             s["summary"] = (summary == null || summary.Trim().Length == 0) ? "" : summary;
             s["contextStart"] = (contextStart < 0) ? 0 : contextStart;
             s["messages"] = (messages == null) ? new List<object>() : messages;
             try { File.WriteAllText(FileOf(id), Json.ToString(s), Encoding.UTF8); }
-            catch (Exception ex) { Console.WriteLine("[session] 保存に失敗しました: " + ex.Message); }
+            catch (Exception ex) { Console.WriteLine("[session] failed to save: " + ex.Message); }
         }
 
         public List<object> List()
@@ -802,7 +802,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                ConsoleUi.Danger("  削除に失敗しました: " + ex.Message + "\n");
+                ConsoleUi.Danger("  Failed to delete: " + ex.Message + "\n");
                 return false;
             }
         }
@@ -991,7 +991,7 @@ namespace Tau
                 }
                 catch (Exception ex)
                 {
-                    Dbg("TLS: Tls12 の設定に失敗: " + ex.Message);
+                    Dbg("TLS: failed to set Tls12: " + ex.Message);
                 }
                 Dbg("TLS: " + before + " -> " + SafeCurrentTls());
             }
@@ -1004,7 +1004,7 @@ namespace Tau
                 SecurityProtocolType p = ServicePointManager.SecurityProtocol;
                 return p.ToString() + "(" + (int)p + ")";
             }
-            catch { return "不明"; }
+            catch { return "unknown"; }
         }
 
         // 現在の TLS 設定(エラー表示用)
@@ -1101,14 +1101,14 @@ namespace Tau
 
             if (DebugOn)
             {
-                Dbg("--- リクエスト設定 ---");
+                Dbg("--- request settings ---");
                 Dbg("  URL      : " + cfg.ApiBaseUrl);
                 Dbg("  Model    : " + cfg.Model);
                 Dbg("  TLS      : " + CurrentTls);
                 Uri u = new Uri(cfg.ApiBaseUrl);
                 string proxyDesc;
-                if (request.Proxy == null) proxyDesc = "null(直接接続)";
-                else if (request.Proxy.IsBypassed(u)) proxyDesc = "直接接続(プロキシを経由しない)";
+                if (request.Proxy == null) proxyDesc = "null (direct connection)";
+                else if (request.Proxy.IsBypassed(u)) proxyDesc = "direct connection (proxy bypassed)";
                 else proxyDesc = request.Proxy.GetProxy(u).ToString();
                 Dbg("  Proxy    : " + proxyDesc);
                 Dbg("  useSystemProxy=" + cfg.UseSystemProxy
@@ -1211,9 +1211,9 @@ namespace Tau
                     if (!IsRetryable(wex) || attempt >= MAX_ATTEMPTS) throw;
 
                     if (IsTlsFailure(wex) && EscalateTls())
-                        ConsoleUi.Info("TLS の設定を変更して再試行します…");
+                        ConsoleUi.Info("Changing the TLS setting and retrying...");
                     else
-                        ConsoleUi.Info("接続を再試行します(" + attempt + "/" + (MAX_ATTEMPTS - 1) + ")…");
+                        ConsoleUi.Info("Retrying the connection (" + attempt + "/" + (MAX_ATTEMPTS - 1) + ")...");
 
                     System.Threading.Thread.Sleep(500 * attempt);
                 }
@@ -1255,27 +1255,27 @@ namespace Tau
         {
             object parsed = Json.Parse(responseBody);
             Dictionary<string, object> root = parsed as Dictionary<string, object>;
-            if (root == null) throw new Exception("LLM API の応答形式が不正です");
+            if (root == null) throw new Exception("LLM API returned a malformed response");
 
             if (root.ContainsKey("error"))
             {
                 Dictionary<string, object> ed = root["error"] as Dictionary<string, object>;
                 if (ed != null && ed.ContainsKey("message"))
-                    throw new Exception("LLM API エラー: " + Json.AsString(ed["message"]));
-                throw new Exception("LLM API エラー: " + Json.ToString(root["error"]));
+                    throw new Exception("LLM API error: " + Json.AsString(ed["message"]));
+                throw new Exception("LLM API error: " + Json.ToString(root["error"]));
             }
 
             if (!root.ContainsKey("choices") || !(root["choices"] is List<object>) ||
                 ((List<object>)root["choices"]).Count == 0)
-                throw new Exception("LLM API の応答に choices がありません");
+                throw new Exception("LLM API response has no choices");
 
             Dictionary<string, object> first =
                 ((List<object>)root["choices"])[0] as Dictionary<string, object>;
             if (first == null || !first.ContainsKey("message"))
-                throw new Exception("LLM API の応答に message がありません");
+                throw new Exception("LLM API response has no message");
 
             Dictionary<string, object> msg = first["message"] as Dictionary<string, object>;
-            if (msg == null) throw new Exception("LLM API の応答に message がありません");
+            if (msg == null) throw new Exception("LLM API response has no message");
 
             LlmResp r = new LlmResp();
             r.Content = msg.ContainsKey("content") ? Json.AsString(msg["content"]) : "";
@@ -1316,7 +1316,7 @@ namespace Tau
                 catch (WebException wex)
                 {
                     Dbg("WebException: status=" + wex.Status + " (attempt " + attempt + "/" + MAX_ATTEMPTS + ")");
-                    Dbg("  連鎖: " + ExceptionChain(wex));
+                    Dbg("  chain: " + ExceptionChain(wex));
 
                     bool retryable = IsRetryable(wex);
                     Dbg("  IsTlsFailure=" + IsTlsFailure(wex) + " retryable=" + retryable);
@@ -1325,9 +1325,9 @@ namespace Tau
 
                     // TLS 設定をまだ変えられるなら変える
                     if (IsTlsFailure(wex) && EscalateTls())
-                        ConsoleUi.Info("TLS の設定を変更して再試行します…");
+                        ConsoleUi.Info("Changing the TLS setting and retrying...");
                     else
-                        ConsoleUi.Info("接続を再試行します(" + attempt + "/" + (MAX_ATTEMPTS - 1) + ")…");
+                        ConsoleUi.Info("Retrying the connection (" + attempt + "/" + (MAX_ATTEMPTS - 1) + ")...");
 
                     // 少し待ってから再試行する(指数バックオフ)
                     int wait = 500 * attempt;
@@ -1375,17 +1375,17 @@ namespace Tau
             current = request;
             try
             {
-                Dbg("接続開始: " + cfg.ApiBaseUrl);
+                Dbg("connecting: " + cfg.ApiBaseUrl);
                 using (Stream s = request.GetRequestStream())
                     s.Write(payload, 0, payload.Length);
-                Dbg("送信完了(" + payload.Length + " bytes)、応答待ち…");
+                Dbg("sent (" + payload.Length + " bytes), waiting for response...");
 
                 using (HttpWebResponse resp = (HttpWebResponse)request.GetResponse())
                 using (StreamReader sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
                     if (DebugOn)
                     {
-                        Dbg("応答受信: HTTP " + (int)resp.StatusCode + " " + resp.StatusDescription);
+                        Dbg("response: HTTP " + (int)resp.StatusCode + " " + resp.StatusDescription);
                         Dbg("  ContentType  : " + resp.ContentType);
                         Dbg("  ContentLength: " + resp.ContentLength);
                         Dbg("  TransferEnc  : " + resp.Headers["Transfer-Encoding"]);
@@ -1476,7 +1476,7 @@ namespace Tau
                             }
                         }
 
-                        Dbg("SSE 読み取り終了: 行数=" + lineNo + " sawDone=" + sawDone
+                        Dbg("SSE read finished: lines=" + lineNo + " sawDone=" + sawDone
                             + " contentLen=" + content.Length);
 
                         // [DONE] を受け取らずにストリームが終わった場合は、
@@ -1484,9 +1484,9 @@ namespace Tau
                         // 黙って途中までの本文を確定させない。
                         if (!sawDone && content.Length > 0)
                         {
-                            throw new Exception("LLM API(stream)エラー: 応答が途中で切断されました"
-                                + "(受信済み " + content.Length + " 文字)。"
-                                + " もう一度お試しください。");
+                            throw new Exception("LLM API (stream) error: the response was cut off"
+                                + " (" + content.Length + " characters received)."
+                                + " Please try again.");
                         }
                     }
                 }
@@ -1499,9 +1499,9 @@ namespace Tau
             catch (IOException iex)
             {
                 // ストリーム読み取り中の切断(「受信時に予期しないエラー」など)
-                throw new Exception("LLM API(stream)エラー: 接続が切断されました: " + iex.Message
-                    + " (受信済み " + content.Length + " 文字)"
-                    + "。ネットワーク/プロキシのタイムアウトや、サーバ側の応答中断が考えられます。");
+                throw new Exception("LLM API (stream) error: the connection was lost: " + iex.Message
+                    + " (" + content.Length + " characters received)"
+                    + ". A network or proxy timeout, or the server aborting the response, is likely.");
             }
             finally
             {
@@ -1554,7 +1554,7 @@ namespace Tau
             if (root.ContainsKey("error"))
             {
                 Dictionary<string, object> ed = root["error"] as Dictionary<string, object>;
-                throw new Exception("LLM API エラー: "
+                throw new Exception("LLM API error: "
                     + (ed != null && ed.ContainsKey("message") ? Json.AsString(ed["message"]) : Json.ToString(root["error"])));
             }
             if (!root.ContainsKey("choices") || !(root["choices"] is List<object>)) return;
@@ -1701,7 +1701,7 @@ namespace Tau
                         Json.AsString(Get(args, "body")));
                 default:
                     return Err("unknown tool: " + name
-                        + " (利用可能: shell/read_file/write_file/list_dir/curl)");
+                        + " (available: shell/read_file/write_file/list_dir/curl)");
             }
         }
 
@@ -1739,42 +1739,49 @@ namespace Tau
             List<object> tools = new List<object>();
 
             tools.Add(Func("shell",
-                "ローカルマシン上でコマンドを実行します。"
-                + " 標準出力・標準エラー・終了コードを返します。"
-                + " ファイル/ディレクトリ操作やプログラム実行など任意のシェルコマンドに使えます。",
+                "Run a command on the local machine. "
+                + "Returns stdout, stderr and the exit code. "
+                + "Use it for any shell command, including file and directory operations "
+                + "and running programs.",
                 new string[] { "cmd" },
-                new string[][] { new string[] { "cmd", "string", "実行するコマンド文字列(例: dir /b)" } }));
+                new string[][] {
+                    new string[] { "cmd", "string", "Command line to run (e.g. dir /b)" }
+                }));
 
             tools.Add(Func("read_file",
-                "指定したファイルの内容をテキストで読み取ります。",
+                "Read the contents of a file as text.",
                 new string[] { "path" },
-                new string[][] { new string[] { "path", "string", "読み取るファイルのパス" } }));
+                new string[][] {
+                    new string[] { "path", "string", "Path of the file to read" }
+                }));
 
             tools.Add(Func("write_file",
-                "指定したパスへテキストを書き込みます(上書き)。",
+                "Write text to the given path, overwriting any existing file.",
                 new string[] { "path", "content" },
                 new string[][] {
-                    new string[] { "path", "string", "書き込むファイルのパス" },
-                    new string[] { "content", "string", "書き込む内容" }
+                    new string[] { "path", "string", "Path of the file to write" },
+                    new string[] { "content", "string", "Text to write" }
                 }));
 
             tools.Add(Func("list_dir",
-                "ディレクトリ内のファイルとサブディレクトリの一覧を返します。",
+                "List the files and subdirectories in a directory.",
                 new string[] { "path" },
                 new string[][] {
-                    new string[] { "path", "string", "一覧を取得するディレクトリのパス" },
-                    new string[] { "pattern", "string", "ファイルの絞り込みパターン(例: *.txt)。省略時は *" }
+                    new string[] { "path", "string", "Directory to list" },
+                    new string[] { "pattern", "string",
+                        "Glob pattern to filter files (e.g. *.txt). Defaults to *" }
                 }));
 
             tools.Add(Func("curl",
-                "HTTP/HTTPS リクエストを送信し、応答を返します。"
-                + " 設定済みのプロキシがあれば経由します。",
+                "Send an HTTP/HTTPS request and return the response. "
+                + "Uses the configured proxy when one is set.",
                 new string[] { "url" },
                 new string[][] {
-                    new string[] { "url", "string", "リクエスト先の URL" },
-                    new string[] { "method", "string", "HTTP メソッド(例: GET, POST)。省略時は body の有無で自動" },
-                    new string[] { "headers", "object", "追加の HTTP ヘッダー" },
-                    new string[] { "body", "string", "リクエストボディ" }
+                    new string[] { "url", "string", "URL to request" },
+                    new string[] { "method", "string",
+                        "HTTP method (e.g. GET, POST). Defaults to POST when a body is given, otherwise GET" },
+                    new string[] { "headers", "object", "Additional HTTP headers" },
+                    new string[] { "body", "string", "Request body" }
                 }));
 
             return tools;
@@ -1784,7 +1791,7 @@ namespace Tau
 
         static string Shell(string cmd, int timeoutSec)
         {
-            if (cmd == null || cmd.Trim().Length == 0) return Err("cmd が空です");
+            if (cmd == null || cmd.Trim().Length == 0) return Err("cmd is empty");
             try
             {
                 bool win = Path.DirectorySeparatorChar == '\\';
@@ -1803,7 +1810,7 @@ namespace Tau
                 if (!p.WaitForExit(timeoutSec * 1000))
                 {
                     try { p.Kill(); } catch { }
-                    return Err("実行がタイムアウトしました(" + timeoutSec + "秒): " + cmd);
+                    return Err("timed out after " + timeoutSec + "s: " + cmd);
                 }
                 p.WaitForExit();
 
@@ -1816,16 +1823,16 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                return Err("shell 実行失敗: " + ex.Message);
+                return Err("shell failed: " + ex.Message);
             }
         }
 
         static string ReadFile(string path)
         {
-            if (path == null || path.Length == 0) return Err("path が指定されていません");
+            if (path == null || path.Length == 0) return Err("path is not specified");
             try
             {
-                if (!File.Exists(path)) return Err("ファイルが存在しません: " + path);
+                if (!File.Exists(path)) return Err("file does not exist: " + path);
                 Dictionary<string, object> d = new Dictionary<string, object>();
                 d["ok"] = true;
                 d["content"] = Clip(DecodeBytes(File.ReadAllBytes(path)));
@@ -1833,13 +1840,13 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                return Err("read_file 失敗: " + ex.Message);
+                return Err("read_file failed: " + ex.Message);
             }
         }
 
         static string WriteFile(string path, string content)
         {
-            if (path == null || path.Length == 0) return Err("path が指定されていません");
+            if (path == null || path.Length == 0) return Err("path is not specified");
             try
             {
                 string dir = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -1854,7 +1861,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                return Err("write_file 失敗: " + ex.Message);
+                return Err("write_file failed: " + ex.Message);
             }
         }
 
@@ -1898,7 +1905,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                return Err("list_dir 失敗: " + ex.Message);
+                return Err("list_dir failed: " + ex.Message);
             }
         }
 
@@ -1912,7 +1919,7 @@ namespace Tau
 
         static string Curl(Config cfg, string url, string method, object headersObj, string body)
         {
-            if (url == null || url.Trim().Length == 0) return Err("url が指定されていません");
+            if (url == null || url.Trim().Length == 0) return Err("url is not specified");
             if (method == null || method.Trim().Length == 0)
                 method = (body != null && body.Length > 0) ? "POST" : "GET";
             method = method.Trim().ToUpperInvariant();
@@ -1961,7 +1968,7 @@ namespace Tau
                 }
                 catch (WebException wex)
                 {
-                    if (wex.Response == null) return Err("curl 通信エラー: " + wex.Message);
+                    if (wex.Response == null) return Err("curl request error: " + wex.Message);
                     using (Stream rs = wex.Response.GetResponseStream())
                         respBody = DecodeBytes(ReadAllBytes(rs));
                     status = ((HttpWebResponse)wex.Response).StatusCode;
@@ -1976,7 +1983,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                return Err("curl 失敗: " + ex.Message);
+                return Err("curl failed: " + ex.Message);
             }
         }
 
@@ -2040,7 +2047,7 @@ namespace Tau
         static string Clip(string s)
         {
             if (s == null) return "";
-            if (s.Length > MAX_OUTPUT) s = s.Substring(0, MAX_OUTPUT) + "\n...[出力が長いため省略]";
+            if (s.Length > MAX_OUTPUT) s = s.Substring(0, MAX_OUTPUT) + "\n...[output truncated]";
             return s;
         }
 
@@ -2186,7 +2193,7 @@ namespace Tau
         static string ComposeSystem(string systemPrompt, string summary)
         {
             if (summary == null || summary.Trim().Length == 0) return systemPrompt;
-            return systemPrompt + "\n\n[これまでの会話の要約]\n" + summary;
+            return systemPrompt + "\n\n[Summary of the conversation so far]\n" + summary;
         }
 
         static List<object> BuildEffectiveMessages(Config cfg, SessionCtx ctx)
@@ -2234,11 +2241,11 @@ namespace Tau
                 string content = m.ContainsKey("content") ? Json.AsString(m["content"]) : "";
                 if (role == "system") continue;
 
-                if (role == "user") sb.Append("ユーザー: ").Append(content).Append("\n");
+                if (role == "user") sb.Append("User: ").Append(content).Append("\n");
                 else if (role == "tool")
                 {
                     string nn = m.ContainsKey("name") ? Json.AsString(m["name"]) : "";
-                    sb.Append("[ツール結果] ").Append(nn).Append(": ")
+                    sb.Append("[Tool result] ").Append(nn).Append(": ")
                       .Append(Clip(Json.AsString(m["content"]), 500)).Append("\n");
                 }
                 else if (role == "assistant")
@@ -2251,11 +2258,11 @@ namespace Tau
                             Dictionary<string, object> fn = (c == null) ? null : (Get(c, "function"));
                             string nm = (fn != null) ? Json.AsString(Get(fn, "name")) : "";
                             string ar = (fn != null) ? Json.AsString(Get(fn, "arguments")) : "";
-                            sb.Append("[ツール呼び出し] ").Append(nm).Append(" args=")
+                            sb.Append("[Tool call] ").Append(nm).Append(" args=")
                               .Append(Clip(ar, 300)).Append("\n");
                         }
                     }
-                    else sb.Append("アシスタント: ").Append(content).Append("\n");
+                    else sb.Append("Assistant: ").Append(content).Append("\n");
                 }
             }
             return sb.ToString();
@@ -2267,15 +2274,16 @@ namespace Tau
             {
                 List<object> body = new List<object>();
                 body.Add(Msg("system",
-                    "あなたはチャット履歴の要約専門のアシスタントです。"
-                    + "後で会話の文脈として再利用できるよう、判断・実施した操作とその結果・ユーザーの要望・"
-                    + "ファイルパス・重要な事実を漏らさず、日本語で簡潔な箇条書きに要約してください。"
-                    + "前置きや「以下が要約です」のような文言は省き、要約本文のみを出力してください。"));
+                    "You are an assistant that specialises in summarising chat history."
+                    + " Produce a concise bullet-point summary that can be reused later as context,"
+                    + " keeping the decisions made, the operations performed and their results,"
+                    + " the user's requests, file paths and important facts."
+                    + " Omit any preamble such as 'Here is the summary'; output only the summary itself."));
 
                 StringBuilder ub = new StringBuilder();
                 if (prevSummary != null && prevSummary.Trim().Length > 0)
-                    ub.Append("【前回までの要約】\n").Append(prevSummary).Append("\n\n");
-                ub.Append("【今回新たに要約する会話】\n").Append(RenderTranscript(span));
+                    ub.Append("[Previous summary]\n").Append(prevSummary).Append("\n\n");
+                ub.Append("[Conversation to summarise now]\n").Append(RenderTranscript(span));
                 body.Add(Msg("user", ub.ToString()));
 
                 LlmResp resp = LlmClient.CallOnce(cfg, body, false);   // 要約用はツール不要
@@ -2314,7 +2322,7 @@ namespace Tau
             if (cut >= ctx.Messages.Count) return;
 
             List<object> span = ctx.Messages.GetRange(ctx.ContextStart, cut - ctx.ContextStart);
-            ConsoleUi.Info("コンテキスト整理(要約)中…");
+            ConsoleUi.Info("Compacting context (summarising)...");
             ctx.Summary = Summarize(cfg, ctx.Summary, span);
             ctx.ContextStart = cut;
             ctx.LastTotalTokens = 0;
@@ -2343,8 +2351,8 @@ namespace Tau
                 {
                     if (cancelled != null && cancelled())
                     {
-                        ctx.Messages.Add(Msg("assistant", "⚠ 処理を中断しました。", turnSteps, ThinkOf(turnThink)));
-                        return "⚠ 処理を中断しました。";
+                        ctx.Messages.Add(Msg("assistant", "⚠ Cancelled.", turnSteps, ThinkOf(turnThink)));
+                        return "⚠ Cancelled.";
                     }
 
                     List<object> eff = BuildEffectiveMessages(cfg, ctx);
@@ -2357,8 +2365,8 @@ namespace Tau
                     }
                     catch (LlmCancelledException)
                     {
-                        ctx.Messages.Add(Msg("assistant", "⚠ 処理を中断しました。", turnSteps, ThinkOf(turnThink)));
-                        return "⚠ 処理を中断しました。";
+                        ctx.Messages.Add(Msg("assistant", "⚠ Cancelled.", turnSteps, ThinkOf(turnThink)));
+                        return "⚠ Cancelled.";
                     }
                     if (resp.TotalTokens > 0) ctx.LastTotalTokens = resp.TotalTokens;
 
@@ -2392,7 +2400,7 @@ namespace Tau
                             if (fn != null && name != null && name.Trim().Length > 0) fn["name"] = name;
 
                             string detail = ToolDetail(name, argsJson);
-                            string step = "ツール実行: " + (name.Length > 0 ? name : "?")
+                            string step = "Tool: " + (name.Length > 0 ? name : "?")
                                 + (detail.Length > 0 ? ("  " + detail) : "");
                             turnSteps.Add(step);
                             if (onTool != null) onTool(name, detail);
@@ -2411,7 +2419,7 @@ namespace Tau
                     ctx.Messages.Add(Msg("assistant", final, turnSteps, ThinkOf(turnThink)));
                     return final;
                 }
-                throw new Exception("LLM が最終回答を出せませんでした(ツール反復が多すぎます)");
+                throw new Exception("The LLM did not produce a final answer (too many tool iterations)");
             }
             finally
             {
@@ -2474,7 +2482,7 @@ namespace Tau
         public static void Tool(string name, string detail)
         {
             Console.Write("  ");
-            Dim("▶ ツール実行: ");
+            Dim("▶ Tool: ");
             Accent(name + (detail.Length > 0 ? ("  " + detail) : ""));
             Console.Write("\n");
         }
@@ -2483,16 +2491,16 @@ namespace Tau
         {
             Console.WriteLine();
             Bold("tau");
-            Muted(" - コンソール AI エージェント");
+            Muted(" - console AI agent");
             Console.WriteLine();
             Console.WriteLine("  Model  : " + cfg.Model);
             Console.WriteLine("  Tools  : " + (cfg.AllowTools ? "on" : "off"));
             Console.WriteLine("  Config : " + cfg.ConfigPath);
             if (ctx != null)
                 Console.WriteLine("  Session: " + ctx.Id + "  (" + ctx.Title + ")"
-                    + (resumed ? "  ← 続きから再開" : ""));
+                    + (resumed ? "  (resumed)" : ""));
             Console.WriteLine();
-            Dim("  /help でコマンド一覧、/exit で終了");
+            Dim("  /help for commands, /exit to quit");
             Console.WriteLine();
         }
     }
@@ -2536,7 +2544,7 @@ namespace Tau
             // 新規作成
             SessionCtx c = new SessionCtx();
             c.Id = store.NewId();
-            c.Title = "新規会話";
+            c.Title = "New conversation";
             store.Save(c.Id, c.Messages, c.Title);
             store.SetLastSessionId(c.Id);
             return c;
@@ -2546,7 +2554,7 @@ namespace Tau
         {
             SessionCtx c = new SessionCtx();
             c.Id = id;
-            c.Title = meta.ContainsKey("title") ? Json.AsString(meta["title"]) : "新規会話";
+            c.Title = meta.ContainsKey("title") ? Json.AsString(meta["title"]) : "New conversation";
             c.Summary = meta.ContainsKey("summary") ? Json.AsString(meta["summary"]) : "";
             c.ContextStart = meta.ContainsKey("contextStart") ? Json.AsInt(meta["contextStart"]) : 0;
             if (meta.ContainsKey("messages") && meta["messages"] is List<object>)
@@ -2562,7 +2570,7 @@ namespace Tau
         // 最初のユーザー発言からタイトルを作る
         void AutoTitle(SessionCtx c, string userMessage)
         {
-            if (c.Title != null && c.Title != "新規会話" && c.Title.Trim().Length > 0) return;
+            if (c.Title != null && c.Title != "New conversation" && c.Title.Trim().Length > 0) return;
             string t = (userMessage ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
             if (t.Length == 0) return;
             if (t.Length > 40) t = t.Substring(0, 40) + "…";
@@ -2600,7 +2608,7 @@ namespace Tau
             }
 
             Console.WriteLine();
-            ConsoleUi.Dim("終了します。セッション: " + ctx.Id);
+            ConsoleUi.Dim("Bye. Session: " + ctx.Id);
         }
 
         // コマンドを処理する。true なら継続、false なら終了。
@@ -2624,13 +2632,12 @@ namespace Tau
 
                 case "/clear":
                 case "/cls":
-                    try { Console.Clear(); } catch { }
-                    ConsoleUi.Banner(cfg, ctx, false);
+                    ClearSession();
                     return true;
 
                 case "/new":
                     ctx = LoadOrCreate("", false);   // 必ず新しいセッションを作る
-                    ConsoleUi.Info("新しいセッションを開始しました: " + ctx.Id);
+                    ConsoleUi.Info("Started a new session: " + ctx.Id);
                     return true;
 
                 case "/sessions":
@@ -2643,13 +2650,13 @@ namespace Tau
                     return true;
 
                 case "/open":
-                    if (arg.Length == 0) { ConsoleUi.Danger("使い方: /open <セッションID>\n"); return true; }
+                    if (arg.Length == 0) { ConsoleUi.Danger("Usage: /open <session id>\n"); return true; }
                     {
                         Dictionary<string, object> meta = store.Load(arg);
-                        if (meta == null) { ConsoleUi.Danger("そのセッションは存在しません: " + arg + "\n"); return true; }
+                        if (meta == null) { ConsoleUi.Danger("No such session: " + arg + "\n"); return true; }
                         ctx = FromMeta(arg, meta);
                         store.SetLastSessionId(ctx.Id);
-                        ConsoleUi.Info("セッションを開きました: " + ctx.Id + "  (" + ctx.Title + ")");
+                        ConsoleUi.Info("Opened session: " + ctx.Id + "  (" + ctx.Title + ")");
                         PrintHistory(ctx);
                     }
                     return true;
@@ -2657,19 +2664,19 @@ namespace Tau
                 case "/model":
                     if (arg.Length == 0)
                     {
-                        Console.WriteLine("  現在のモデル: " + cfg.Model);
-                        ConsoleUi.Dim("  変更: /model <モデル名>\n");
+                        Console.WriteLine("  Current model: " + cfg.Model);
+                        ConsoleUi.Dim("  Change: /model <name>\n");
                         return true;
                     }
                     cfg.Model = arg;
                     cfg.Save();
-                    ConsoleUi.Info("モデルを切り替えました: " + cfg.Model);
+                    ConsoleUi.Info("Switched model: " + cfg.Model);
                     return true;
 
                 case "/tools":
                     cfg.AllowTools = !cfg.AllowTools;
                     cfg.Save();
-                    ConsoleUi.Info("ツール実行: " + (cfg.AllowTools ? "on" : "off"));
+                    ConsoleUi.Info("Tools: " + (cfg.AllowTools ? "on" : "off"));
                     return true;
 
                 case "/config":
@@ -2686,7 +2693,7 @@ namespace Tau
                         }
                         else
                         {
-                            ConsoleUi.Danger("使い方: /config [edit]\n");
+                            ConsoleUi.Danger("Usage: /config [edit]\n");
                         }
                     }
                     return true;
@@ -2695,11 +2702,11 @@ namespace Tau
                     {
                         if (arg.Length == 0)
                         {
-                            ConsoleUi.Dim("  使い方: /set <key> <value>\n");
-                            ConsoleUi.Dim("  例: /set model gpt-4o\n");
+                            ConsoleUi.Dim("  Usage: /set <key> <value>\n");
+                            ConsoleUi.Dim("  e.g. /set model gpt-4o\n");
                             ConsoleUi.Dim("      /set allowTools false\n");
                             ConsoleUi.Dim("      /set contextWindow 128000\n");
-                            ConsoleUi.Dim("  key 一覧は /config で確認できます\n");
+                            ConsoleUi.Dim("  See /config for the list of keys\n");
                             return true;
                         }
                         // "<key> <value>" を分割する(値に空白を含められるようにする)
@@ -2710,30 +2717,30 @@ namespace Tau
                         Settings.Field f = Settings.Find(key);
                         if (f == null)
                         {
-                            ConsoleUi.Danger("不明な設定項目です: " + key + "\n");
-                            ConsoleUi.Dim("  /config で項目一覧を表示します\n");
+                            ConsoleUi.Danger("Unknown setting: " + key + "\n");
+                            ConsoleUi.Dim("  Use /config to list the settings\n");
                             return true;
                         }
                         if (value.Trim().Length == 0 && f.Kind != "string" && f.Kind != "secret")
                         {
-                            ConsoleUi.Dim("  現在値: " + Settings.Display(cfg, f) + "\n");
-                            ConsoleUi.Dim("  使い方: /set " + f.Key + " <value>\n");
+                            ConsoleUi.Dim("  Current value: " + Settings.Display(cfg, f) + "\n");
+                            ConsoleUi.Dim("  Usage: /set " + f.Key + " <value>\n");
                             return true;
                         }
                         if (!Settings.Apply(cfg, f, value))
                         {
-                            ConsoleUi.Danger("値が不正です: " + value + "\n");
-                            ConsoleUi.Dim("  現在値: " + Settings.Display(cfg, f) + "\n");
+                            ConsoleUi.Danger("Invalid value: " + value + "\n");
+                            ConsoleUi.Dim("  Current value: " + Settings.Display(cfg, f) + "\n");
                             return true;
                         }
                         cfg.Save();
-                        ConsoleUi.Info(f.Key + " = " + Settings.Display(cfg, f) + "  に変更しました");
+                        ConsoleUi.Info(f.Key + " = " + Settings.Display(cfg, f) + "  (updated)");
                     }
                     return true;
 
                 default:
-                    ConsoleUi.Danger("不明なコマンドです: " + cmd + "\n");
-                    ConsoleUi.Dim("  /help でコマンド一覧を表示します\n");
+                    ConsoleUi.Danger("Unknown command: " + cmd + "\n");
+                    ConsoleUi.Dim("  Use /help to list the commands\n");
                     return true;
             }
         }
@@ -2742,8 +2749,8 @@ namespace Tau
         void ShowSessions()
         {
             List<object> list = store.List();
-            if (list.Count == 0) { ConsoleUi.Info("保存済みセッションはありません"); return; }
-            Console.WriteLine("  保存済みセッション (" + store.DataDir + ")");
+            if (list.Count == 0) { ConsoleUi.Info("No saved sessions"); return; }
+            Console.WriteLine("  Saved sessions (" + store.DataDir + ")");
             for (int i = 0; i < list.Count; i++)
             {
                 Dictionary<string, object> s = list[i] as Dictionary<string, object>;
@@ -2753,10 +2760,10 @@ namespace Tau
                 int count = s.ContainsKey("count") ? Json.AsInt(s["count"]) : 0;
                 string mark = (id == ctx.Id) ? "* " : "  ";
                 Console.WriteLine(mark + (i + 1).ToString().PadLeft(2) + ". "
-                    + id + "  " + title + "  (" + count + " 件)");
+                    + id + "  " + title + "  (" + count + " msgs)");
             }
             Console.WriteLine();
-            ConsoleUi.Dim("  * = 現在のセッション。削除は /delete <番号|ID>\n");
+            ConsoleUi.Dim("  * = current session. Delete with /delete <number|id>\n");
         }
 
         // 番号(1 始まり)または ID からセッション ID を解決する
@@ -2780,57 +2787,90 @@ namespace Tau
         }
 
         // セッションを削除する
-        void DeleteSession(string arg)
+        // 現在のセッションの内容(会話履歴)をクリアする。
+        // セッション自体(ID・タイトル)は残す。
+        void ClearSession()
         {
-            if ((arg ?? "").Trim().Length == 0)
+            if (ctx.Messages.Count == 0)
             {
-                ConsoleUi.Danger("削除するセッションを指定してください\n");
-                ConsoleUi.Dim("  使い方: /delete <番号|ID>   (番号は /sessions で確認)\n");
+                ConsoleUi.Info("This session has no messages yet");
                 return;
             }
 
-            string id = ResolveSessionId(arg);
-            if (id.Length == 0)
-            {
-                ConsoleUi.Danger("その番号のセッションはありません: " + arg + "\n");
-                ConsoleUi.Dim("  /sessions で番号を確認してください\n");
-                return;
-            }
-
-            Dictionary<string, object> meta = store.Load(id);
-            if (meta == null)
-            {
-                ConsoleUi.Danger("そのセッションは存在しません: " + arg + "\n");
-                return;
-            }
-
-            string title = meta.ContainsKey("title") ? Json.AsString(meta["title"]) : "";
-
-            // 誤操作を防ぐため確認する
-            Console.Write("  削除しますか？ " + id + "  (" + title + ")  [y/N]: ");
+            Console.Write("  Clear this session's history? ("
+                + ctx.Messages.Count + " msgs)  [y/N]: ");
             string ans;
             try { ans = Console.ReadLine(); }
             catch { ans = null; }
             ans = Program.SanitizeInput(ans).Trim().ToLowerInvariant();
             if (ans != "y" && ans != "yes")
             {
-                ConsoleUi.Dim("  中止しました\n");
+                ConsoleUi.Dim("  Cancelled\n");
+                return;
+            }
+
+            // 履歴・要約・コンテキスト開始位置をリセットする
+            ctx.Messages = new List<object>();
+            ctx.Summary = "";
+            ctx.ContextStart = 0;
+            ctx.LastTotalTokens = 0;
+            Save(ctx);
+
+            ConsoleUi.Info("Cleared the session history: " + ctx.Id + "  (" + ctx.Title + ")");
+            PrintHistory(ctx);
+        }
+
+        void DeleteSession(string arg)
+        {
+            if ((arg ?? "").Trim().Length == 0)
+            {
+                ConsoleUi.Danger("Specify the session to delete\n");
+                ConsoleUi.Dim("  Usage: /delete <number|id>   (numbers come from /sessions)\n");
+                return;
+            }
+
+            string id = ResolveSessionId(arg);
+            if (id.Length == 0)
+            {
+                ConsoleUi.Danger("No session with that number: " + arg + "\n");
+                ConsoleUi.Dim("  Check the numbers with /sessions\n");
+                return;
+            }
+
+            Dictionary<string, object> meta = store.Load(id);
+            if (meta == null)
+            {
+                ConsoleUi.Danger("No such session: " + arg + "\n");
+                return;
+            }
+
+            string title = meta.ContainsKey("title") ? Json.AsString(meta["title"]) : "";
+
+            // 誤操作を防ぐため確認する
+            Console.Write("  Delete " + id + "  (" + title + ")?  [y/N]: ");
+            string ans;
+            try { ans = Console.ReadLine(); }
+            catch { ans = null; }
+            ans = Program.SanitizeInput(ans).Trim().ToLowerInvariant();
+            if (ans != "y" && ans != "yes")
+            {
+                ConsoleUi.Dim("  Cancelled\n");
                 return;
             }
 
             bool wasCurrent = (id == ctx.Id);
             if (!store.Delete(id))
             {
-                ConsoleUi.Danger("削除できませんでした: " + id + "\n");
+                ConsoleUi.Danger("Could not delete: " + id + "\n");
                 return;
             }
-            ConsoleUi.Info("削除しました: " + id + "  (" + title + ")");
+            ConsoleUi.Info("Deleted: " + id + "  (" + title + ")");
 
             // 表示中のセッションを消した場合は、別のセッションへ切り替える
             if (wasCurrent)
             {
                 ctx = LoadOrCreate("", true);
-                ConsoleUi.Info("セッションを切り替えました: " + ctx.Id + "  (" + ctx.Title + ")");
+                ConsoleUi.Info("Switched session: " + ctx.Id + "  (" + ctx.Title + ")");
                 PrintHistory(ctx);
             }
         }
@@ -2839,7 +2879,7 @@ namespace Tau
         void PrintHistory(SessionCtx c)
         {
             Console.WriteLine();
-            ConsoleUi.Dim("---- これまでの会話 ----");
+            ConsoleUi.Dim("---- conversation so far ----");
             Console.WriteLine();
             foreach (object o in c.Messages)
             {
@@ -2860,7 +2900,7 @@ namespace Tau
                     {
                         string think = Json.AsString(m["think"]);
                         if (think.Trim().Length > 0)
-                            ConsoleUi.Think("  [思考] " + think + "\n");
+                            ConsoleUi.Think("  [thinking] " + think + "\n");
                     }
                     if (m.ContainsKey("steps") && m["steps"] is List<object>)
                     {
@@ -2881,10 +2921,10 @@ namespace Tau
                 else if (role == "tool")
                 {
                     string nn = m.ContainsKey("name") ? Json.AsString(m["name"]) : "";
-                    ConsoleUi.Dim("  [ツール結果] " + nn + "\n");
+                    ConsoleUi.Dim("  [tool result] " + nn + "\n");
                 }
             }
-            ConsoleUi.Dim("---- ここから続きを入力できます ----");
+            ConsoleUi.Dim("---- continue below ----");
             Console.WriteLine();
         }
 
@@ -2921,7 +2961,7 @@ namespace Tau
                             if (kind != KIND_NONE) Console.WriteLine();
                             kind = KIND_THINK;
                             Console.Write("  ");
-                            ConsoleUi.Dim("[思考] ");
+                            ConsoleUi.Dim("[thinking] ");
                         }
                         ConsoleUi.Think(d);
                     },
@@ -2948,41 +2988,41 @@ namespace Tau
                 WebException wex = ex as WebException;
                 if (wex != null) msg = LlmClient.DescribeWebException(wex);
                 else msg = ex.Message;
-                ConsoleUi.Danger("⚠ エラー: " + msg + "\n");
+                ConsoleUi.Danger("⚠ Error: " + msg + "\n");
 
                 // TLS ハンドシェイク失敗は、利用者が対処しやすいよう補足を出す
                 if (wex != null && LlmClient.IsTlsFailure(wex))
                 {
-                    ConsoleUi.Dim("  TLS のハンドシェイクに失敗しました。\n");
-                    ConsoleUi.Dim("  ・接続先: " + cfg.ApiBaseUrl + "\n");
-                    ConsoleUi.Dim("  ・tau は TLS 1.2 を指定して接続を試みました"
-                        + (LlmClient.TlsApplied ? "(適用済み)" : "(適用できませんでした)") + "。\n");
-                    ConsoleUi.Dim("  ・それでも失敗する場合は、次のいずれかが原因です。\n");
-                    ConsoleUi.Dim("    1) OS 側で TLS 1.2 が無効になっている\n");
-                    ConsoleUi.Dim("       (Windows の「インターネットオプション」→ 詳細設定 →\n");
-                    ConsoleUi.Dim("        「TLS 1.2 を使用する」にチェック)\n");
-                    ConsoleUi.Dim("    2) .NET Framework の強暗号化が無効\n");
-                    ConsoleUi.Dim("       次のレジストリ値を 1 にする(DWORD):\n");
+                    ConsoleUi.Dim("  The TLS handshake failed.\n");
+                    ConsoleUi.Dim("  - Endpoint: " + cfg.ApiBaseUrl + "\n");
+                    ConsoleUi.Dim("  - tau tried connecting with TLS 1.2 "
+                        + (LlmClient.TlsApplied ? "(applied)" : "(could not be applied)") + ".\n");
+                    ConsoleUi.Dim("  - If it still fails, one of the following is likely the cause:\n");
+                    ConsoleUi.Dim("    1) TLS 1.2 is disabled in the OS\n");
+                    ConsoleUi.Dim("       (Internet Options -> Advanced ->\n");
+                    ConsoleUi.Dim("        enable \"Use TLS 1.2\")\n");
+                    ConsoleUi.Dim("    2) Strong cryptography is disabled for .NET Framework\n");
+                    ConsoleUi.Dim("       Set these DWORD values to 1:\n");
                     ConsoleUi.Dim("       HKLM\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\n");
                     ConsoleUi.Dim("         SchUseStrongCrypto\n");
                     ConsoleUi.Dim("         SystemDefaultTlsVersions\n");
-                    ConsoleUi.Dim("       (32bit 版は WOW6432Node 側にも同じ値を設定)\n");
-                    ConsoleUi.Dim("    3) プロキシ経由の場合、プロキシ自体が TLS 1.2 に未対応\n");
-                    ConsoleUi.Dim("       (tau.json の proxyUrl / useSystemProxy を確認)\n");
-                    ConsoleUi.Dim("  ・切り分け: PowerShell で次を実行し、接続できるか確認できます。\n");
+                    ConsoleUi.Dim("       (set the same values under WOW6432Node for 32-bit)\n");
+                    ConsoleUi.Dim("    3) The proxy itself does not support TLS 1.2\n");
+                    ConsoleUi.Dim("       (check proxyUrl / useSystemProxy in tau.json)\n");
+                    ConsoleUi.Dim("  - To isolate the problem, run this in PowerShell:\n");
                     ConsoleUi.Dim("       [Net.ServicePointManager]::SecurityProtocol = 'Tls12'\n");
                     ConsoleUi.Dim("       Invoke-WebRequest " + cfg.ApiBaseUrl + " -Method Head\n");
-                    ConsoleUi.Dim("  ・詳細: 環境変数 TAU_DEBUG=1 を設定して再実行すると、\n");
-                    ConsoleUi.Dim("    実際の TLS 設定と例外の連鎖が表示されます。\n");
+                    ConsoleUi.Dim("  - For more detail, set TAU_DEBUG=1 and run again;\n");
+                    ConsoleUi.Dim("    the actual TLS setting and the exception chain will be shown.\n");
                 }
 
                 // TAU_DEBUG=1 のときは、例外の連鎖と環境情報を必ず出す
                 if (LlmClient.DebugOn)
                 {
                     ConsoleUi.Dim("  --- debug ---\n");
-                    ConsoleUi.Dim("  環境: " + LlmClient.DescribeEnvironment() + "\n");
-                    ConsoleUi.Dim("  TLS : " + LlmClient.CurrentTls + "\n");
-                    ConsoleUi.Dim("  例外: " + LlmClient.ExceptionChain(ex).Replace("\n", "\n        ") + "\n");
+                    ConsoleUi.Dim("  env: " + LlmClient.DescribeEnvironment() + "\n");
+                    ConsoleUi.Dim("  TLS: " + LlmClient.CurrentTls + "\n");
+                    ConsoleUi.Dim("  exception: " + LlmClient.ExceptionChain(ex).Replace("\n", "\n        ") + "\n");
                     ConsoleUi.Dim("  ----\n");
                 }
             }
@@ -3006,20 +3046,20 @@ namespace Tau
         public static void Run(Config cfg)
         {
             Console.WriteLine();
-            ConsoleUi.Bold("tau --diag  接続診断");
+            ConsoleUi.Bold("tau --diag  connection diagnostic");
             Console.WriteLine();
 
-            Console.WriteLine("  [環境]");
+            Console.WriteLine("  [environment]");
             Console.WriteLine("    " + LlmClient.DescribeEnvironment());
             Console.WriteLine();
 
-            Console.WriteLine("  [設定]");
+            Console.WriteLine("  [settings]");
             Console.WriteLine("    URL     : " + cfg.ApiBaseUrl);
             Console.WriteLine("    Model   : " + cfg.Model);
             Console.WriteLine("    Proxy   : " + (cfg.ProxyUrl != null && cfg.ProxyUrl.Trim().Length > 0
-                                ? cfg.ProxyUrl : "(なし)"));
-            Console.WriteLine("    SysProxy: " + (cfg.UseSystemProxy ? "有効" : "無効(直接接続)"));
-            Console.WriteLine("    API Key : " + (cfg.SecretKey.Length > 0 ? "設定済み" : "未設定"));
+                                ? cfg.ProxyUrl : "(none)"));
+            Console.WriteLine("    SysProxy: " + (cfg.UseSystemProxy ? "enabled" : "disabled (direct)"));
+            Console.WriteLine("    API Key : " + (cfg.SecretKey.Length > 0 ? "set" : "not set"));
             Console.WriteLine("    Config  : " + cfg.ConfigPath);
             Console.WriteLine();
 
@@ -3027,11 +3067,11 @@ namespace Tau
             try { uri = new Uri(cfg.ApiBaseUrl); }
             catch (Exception ex)
             {
-                ConsoleUi.Danger("  URL が不正です: " + ex.Message + "\n");
+                ConsoleUi.Danger("  Invalid URL: " + ex.Message + "\n");
                 return;
             }
 
-            Console.WriteLine("  [接続先]");
+            Console.WriteLine("  [endpoint]");
             Console.WriteLine("    Host : " + uri.Host);
             Console.WriteLine("    Port : " + uri.Port);
             Console.WriteLine("    Path : " + uri.AbsolutePath);
@@ -3048,13 +3088,13 @@ namespace Tau
             }
             catch (Exception ex)
             {
-                ConsoleUi.Danger("    DNS  : 解決できません: " + ex.Message + "\n");
+                ConsoleUi.Danger("    DNS  : cannot resolve: " + ex.Message + "\n");
             }
             Console.WriteLine();
 
             // --- TLS の各バージョンを試す ---
-            Console.WriteLine("  [TLS の接続試験]");
-            Console.WriteLine("    (TCP 接続 + TLS ハンドシェイクのみを試します。HTTP は送りません)");
+            Console.WriteLine("  [TLS handshake test]");
+            Console.WriteLine("    (TCP connect + TLS handshake only; no HTTP is sent)");
             Console.WriteLine();
 
             // TLS の可否は TCP 接続 + SslStream のハンドシェイクだけで判定する。
@@ -3070,7 +3110,7 @@ namespace Tau
                 catch { }
                 if (v == null)
                 {
-                    Console.WriteLine("    " + Pad(n) + ": (この .NET には無い)");
+                    Console.WriteLine("    " + Pad(n) + ": (not available in this .NET)");
                     continue;
                 }
                 string result = ProbeTls(uri, cfg, (SecurityProtocolType)v);
@@ -3079,15 +3119,15 @@ namespace Tau
             }
             Console.WriteLine();
             if (anyOk)
-                ConsoleUi.Dim("    → TLS ハンドシェイクは成功しています。\n");
+                ConsoleUi.Dim("    -> TLS handshakes succeed.\n");
             else
-                ConsoleUi.Danger("    → すべての TLS でハンドシェイクに失敗しました。\n");
+                ConsoleUi.Danger("    -> every TLS handshake failed.\n");
             Console.WriteLine();
 
             // --- 実際の API 呼び出し ---
-            Console.WriteLine("  [API 呼び出し試験]");
+            Console.WriteLine("  [API call test]");
             LlmClient.ApplyTls();
-            Console.WriteLine("    使用 TLS : " + LlmClient.CurrentTls);
+            Console.WriteLine("    TLS used : " + LlmClient.CurrentTls);
 
             List<object> msgs = new List<object>();
             Dictionary<string, object> m = new Dictionary<string, object>();
@@ -3098,25 +3138,25 @@ namespace Tau
             try
             {
                 LlmResp resp = LlmClient.CallOnce(cfg, msgs, false);
-                Console.WriteLine("    結果     : OK");
-                Console.WriteLine("    応答     : " + FirstLine(resp.Content));
+                Console.WriteLine("    Result   : OK");
+                Console.WriteLine("    Reply    : " + FirstLine(resp.Content));
             }
             catch (WebException wex)
             {
-                ConsoleUi.Danger("    結果     : NG " + wex.Status + "\n");
-                Console.WriteLine("    詳細     : " + LlmClient.DescribeWebException(wex));
-                Console.WriteLine("    連鎖     : " + LlmClient.ExceptionChain(wex));
+                ConsoleUi.Danger("    Result   : NG " + wex.Status + "\n");
+                Console.WriteLine("    Detail   : " + LlmClient.DescribeWebException(wex));
+                Console.WriteLine("    Chain    : " + LlmClient.ExceptionChain(wex));
             }
             catch (Exception ex)
             {
-                ConsoleUi.Danger("    結果     : NG " + ex.GetType().Name + "\n");
-                Console.WriteLine("    詳細     : " + ex.Message);
+                ConsoleUi.Danger("    Result   : NG " + ex.GetType().Name + "\n");
+                Console.WriteLine("    Detail   : " + ex.Message);
             }
             Console.WriteLine();
 
             // --- ストリーミング呼び出し試験(対話と同じ経路) ---
-            Console.WriteLine("  [ストリーミング呼び出し試験]");
-            Console.WriteLine("    (対話と同じ経路。Accept: text/event-stream で SSE を受信します)");
+            Console.WriteLine("  [streaming call test]");
+            Console.WriteLine("    (same path as the chat: Accept: text/event-stream, receives SSE)");
             try
             {
                 StringBuilder got = new StringBuilder();
@@ -3124,29 +3164,29 @@ namespace Tau
                 LlmClient.CallStream(cfg, msgs, false,
                     delegate (string d) { chunks++; if (got.Length < 200) got.Append(d); },
                     delegate (string d) { });
-                Console.WriteLine("    結果     : OK  (受信チャンク " + chunks + " 個)");
-                Console.WriteLine("    応答     : " + FirstLine(got.ToString()));
+                Console.WriteLine("    Result   : OK  (" + chunks + " chunks received)");
+                Console.WriteLine("    Reply    : " + FirstLine(got.ToString()));
             }
             catch (WebException wex)
             {
-                ConsoleUi.Danger("    結果     : NG " + wex.Status + "\n");
-                Console.WriteLine("    詳細     : " + LlmClient.DescribeWebException(wex));
-                Console.WriteLine("    連鎖     : " + LlmClient.ExceptionChain(wex));
+                ConsoleUi.Danger("    Result   : NG " + wex.Status + "\n");
+                Console.WriteLine("    Detail   : " + LlmClient.DescribeWebException(wex));
+                Console.WriteLine("    Chain    : " + LlmClient.ExceptionChain(wex));
             }
             catch (Exception ex)
             {
-                ConsoleUi.Danger("    結果     : NG " + ex.GetType().Name + "\n");
-                Console.WriteLine("    詳細     : " + LlmClient.ExceptionChain(ex));
+                ConsoleUi.Danger("    Result   : NG " + ex.GetType().Name + "\n");
+                Console.WriteLine("    Detail   : " + LlmClient.ExceptionChain(ex));
             }
             Console.WriteLine();
 
-            ConsoleUi.Dim("  [判定の見方]\n");
-            ConsoleUi.Dim("    ・API 呼び出し試験が OK なら、tau の接続・認証は正常です。\n");
-            ConsoleUi.Dim("      TLS の接続試験が NG でも、それは証明書やプロトコルの試験結果で、\n");
-            ConsoleUi.Dim("      HttpWebRequest は別の経路で成功している場合があります。\n");
-            ConsoleUi.Dim("    ・TLSV1_ALERT_PROTOCOL_VERSION = サーバがその TLS を受け付けない\n");
-            ConsoleUi.Dim("    ・CERTIFICATE_VERIFY_FAILED = 証明書の検証に失敗(社内プロキシ等)\n");
-            ConsoleUi.Dim("    ・SslProtocolType エラー = .NET がその値を解釈できない\n");
+            ConsoleUi.Dim("  [how to read this]\n");
+            ConsoleUi.Dim("    - If the API call test is OK, tau can connect and authenticate.\n");
+            ConsoleUi.Dim("      A failing TLS handshake test only reflects certificate or protocol results;\n");
+            ConsoleUi.Dim("      HttpWebRequest may still succeed through another path.\n");
+            ConsoleUi.Dim("    - TLSV1_ALERT_PROTOCOL_VERSION = the server rejects that TLS version\n");
+            ConsoleUi.Dim("    - CERTIFICATE_VERIFY_FAILED = certificate verification failed (e.g. a corporate proxy)\n");
+            ConsoleUi.Dim("    - SslProtocolType error = .NET cannot interpret that value\n");
         }
 
         static string Pad(string s)
@@ -3170,7 +3210,7 @@ namespace Tau
                 if (!ar.AsyncWaitHandle.WaitOne(15000))
                 {
                     try { c.Close(); } catch { }
-                    return "NG  接続タイムアウト(15秒)";
+                    return "NG  connection timed out (15s)";
                 }
                 c.EndConnect(ar);
 
@@ -3242,35 +3282,35 @@ namespace Tau
         public static readonly Field[] Fields = new Field[]
         {
             new Field { Key = "llmApiUrl", Label = "API URL", Kind = "string",
-                Help = "OpenAI 互換の /chat/completions の URL" },
+                Help = "OpenAI-compatible /chat/completions URL" },
             new Field { Key = "llmApiKey", Label = "API Key", Kind = "secret",
-                Help = "API キー(表示時は伏せ字)" },
+                Help = "API key (masked when displayed)" },
             new Field { Key = "model", Label = "Model", Kind = "string",
-                Help = "使用するモデル名" },
+                Help = "Model name to use" },
             new Field { Key = "allowTools", Label = "Allow Tools", Kind = "bool",
-                Help = "ツール実行の可否 (true/false)" },
+                Help = "Allow tool execution (true/false)" },
             new Field { Key = "emitReasoning", Label = "Emit Reasoning", Kind = "bool",
-                Help = "思考(reasoning)を表示するか (true/false)" },
+                Help = "Show reasoning (true/false)" },
             new Field { Key = "contextWindow", Label = "Context Window", Kind = "int",
-                Help = "コンテキスト上限(推定トークン)" },
+                Help = "Context window (estimated tokens)" },
             new Field { Key = "reserveTokens", Label = "Reserve Tokens", Kind = "int",
-                Help = "応答用に確保するトークン" },
+                Help = "Tokens reserved for the reply" },
             new Field { Key = "keepRecentTokens", Label = "Keep Recent Tokens", Kind = "int",
-                Help = "要約せず残す直近トークン数" },
+                Help = "Recent tokens kept without summarising" },
             new Field { Key = "maxToolsPerTurn", Label = "Max Tools Per Turn", Kind = "int",
-                Help = "1 ターンで実行するツールの上限" },
+                Help = "Maximum tools executed per turn" },
             new Field { Key = "toolTimeoutSec", Label = "Tool Timeout (sec)", Kind = "int",
-                Help = "ツール実行のタイムアウト(秒)" },
+                Help = "Tool execution timeout (seconds)" },
             new Field { Key = "useSystemProxy", Label = "Use System Proxy", Kind = "bool",
-                Help = "OS のシステムプロキシを使うか (true/false)" },
+                Help = "Use the OS system proxy (true/false)" },
             new Field { Key = "proxyUrl", Label = "Proxy URL", Kind = "string",
-                Help = "社内プロキシの URL(空なら使わない)" },
+                Help = "Proxy URL (empty means no proxy)" },
             new Field { Key = "proxyUser", Label = "Proxy User", Kind = "string",
-                Help = "プロキシ認証ユーザー" },
+                Help = "Proxy authentication user" },
             new Field { Key = "proxyPass", Label = "Proxy Pass", Kind = "secret",
-                Help = "プロキシ認証パスワード" },
+                Help = "Proxy authentication password" },
             new Field { Key = "systemPrompt", Label = "System Prompt", Kind = "text",
-                Help = "システムプロンプト(複数行可)" },
+                Help = "System prompt (multi-line)" },
         };
 
         public static Field Find(string key)
@@ -3292,7 +3332,7 @@ namespace Tau
             if (f.Kind == "secret")
             {
                 string sv = Json.AsString(v);
-                if (sv.Length == 0) return "(未設定)";
+                if (sv.Length == 0) return "(not set)";
                 if (sv.Length <= 8) return new string('*', sv.Length);
                 return sv.Substring(0, 3) + "..." + new string('*', Math.Min(8, sv.Length - 3));
             }
@@ -3362,7 +3402,7 @@ namespace Tau
         // 現在の設定を表示する
         public static void Show(Config cfg)
         {
-            Console.WriteLine("  設定ファイル: " + cfg.ConfigPath);
+            Console.WriteLine("  Config file: " + cfg.ConfigPath);
             Console.WriteLine();
             for (int i = 0; i < Fields.Length; i++)
             {
@@ -3370,7 +3410,7 @@ namespace Tau
                 Console.WriteLine("    " + Pad(f.Key) + " = " + Display(cfg, f));
             }
             Console.WriteLine();
-            ConsoleUi.Dim("  変更: /set <key> <value>   または  /config edit\n");
+            ConsoleUi.Dim("  Change: /set <key> <value>   or   /config edit\n");
         }
 
         static string Pad(string s)
@@ -3383,7 +3423,7 @@ namespace Tau
         public static void Edit(Config cfg)
         {
             Console.WriteLine();
-            ConsoleUi.Bold("  設定の編集");
+            ConsoleUi.Bold("  Edit settings");
             Console.WriteLine();
             for (int i = 0; i < Fields.Length; i++)
             {
@@ -3393,26 +3433,26 @@ namespace Tau
                 ConsoleUi.Dim("        " + f.Help + "\n");
             }
             Console.WriteLine();
-            ConsoleUi.Dim("  変更する項目の番号を入力 (Enter で中止): ");
+            ConsoleUi.Dim("  Enter the number of the field to change (Enter to cancel): ");
             string pick = Program.SanitizeInput(Console.ReadLine()).Trim();
-            if (pick.Length == 0) { ConsoleUi.Dim("  中止しました\n"); return; }
+            if (pick.Length == 0) { ConsoleUi.Dim("  Cancelled\n"); return; }
 
             int idx;
             if (!int.TryParse(pick, out idx) || idx < 1 || idx > Fields.Length)
             {
-                ConsoleUi.Danger("  番号が不正です\n");
+                ConsoleUi.Danger("  Invalid number\n");
                 return;
             }
 
             Field field = Fields[idx - 1];
             Console.WriteLine();
             Console.WriteLine("  " + field.Key + "  (" + field.Help + ")");
-            Console.WriteLine("  現在値: " + Display(cfg, field));
+            Console.WriteLine("  Current value: " + Display(cfg, field));
 
             string value;
             if (field.Kind == "text")
             {
-                ConsoleUi.Dim("  新しい値を入力 (空行だけで終了。空にはできません):\n");
+                ConsoleUi.Dim("  Enter the new value (a blank line finishes; it cannot be empty):\n");
                 StringBuilder sb = new StringBuilder();
                 while (true)
                 {
@@ -3424,26 +3464,26 @@ namespace Tau
                     sb.Append(ln);
                 }
                 value = sb.ToString();
-                if (value.Trim().Length == 0) { ConsoleUi.Dim("  中止しました\n"); return; }
+                if (value.Trim().Length == 0) { ConsoleUi.Dim("  Cancelled\n"); return; }
             }
             else
             {
-                ConsoleUi.Dim("  新しい値を入力 (Enter で中止): ");
+                ConsoleUi.Dim("  Enter the new value (Enter to cancel): ");
                 value = Program.SanitizeInput(Console.ReadLine());
                 if (value.Length == 0 && field.Kind != "string" && field.Kind != "secret")
                 {
-                    ConsoleUi.Dim("  中止しました\n");
+                    ConsoleUi.Dim("  Cancelled\n");
                     return;
                 }
             }
 
             if (!Apply(cfg, field, value))
             {
-                ConsoleUi.Danger("  値が不正です: " + value + "\n");
+                ConsoleUi.Danger("  Invalid value: " + value + "\n");
                 return;
             }
             cfg.Save();
-            ConsoleUi.Info(field.Key + " = " + Display(cfg, field) + "  に変更しました");
+            ConsoleUi.Info(field.Key + " = " + Display(cfg, field) + "  (updated)");
         }
     }
 }
