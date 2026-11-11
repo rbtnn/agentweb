@@ -307,6 +307,43 @@ tau.json:
     output encoding: utf-8 (CP65001)
 ```
 
+### Emacs 風キーバインド（行編集）
+
+`tau` は対話プロンプトで **Emacs 風のキーバインド**を使えます。
+
+| キー | 動作 |
+|---|---|
+| `Ctrl-A` / `Ctrl-E` | 行頭 / 行末へ移動 |
+| `Ctrl-B` / `Ctrl-F` | 1 文字 戻る / 進む |
+| `Ctrl-H`（Backspace） | カーソル前の 1 文字を削除 |
+| `Ctrl-D` | カーソル位置の 1 文字を削除（空行なら中止） |
+| `Ctrl-K` | カーソル以降を削除（キルリングへ） |
+| `Ctrl-U` | カーソル以前を削除（キルリングへ） |
+| `Ctrl-W` | 直前の単語を削除（キルリングへ） |
+| `Ctrl-Y` | キルリングの内容を貼り付け |
+| `Ctrl-T` | カーソル前後の文字を入れ替え |
+| `Ctrl-L` | 画面を消して再描画 |
+| `Alt-B` / `Alt-F` | 単語単位で戻る / 進む |
+| `Alt-D` / `Alt-Backspace` | 次の単語 / 前の単語を削除 |
+| `Ctrl-G` / `Ctrl-C` | 入力を中止 |
+| `←` `→` `Home` `End` `Delete` | 通常のカーソル移動・削除 |
+
+日本語（全角）も 1 文字として扱います。
+
+> **重要: 入力エンコーディングが UTF-8 のときだけ有効です。**
+> 行編集は `Console.ReadKey()` で 1 文字ずつ読むため、`Console.InputEncoding` に従って
+> 文字が変換されます。**Shift-JIS（CP932）だと `ReadKey` が返す日本語が壊れる**
+> （例: 「あ」→ U+7E3A）ため、Shift-JIS では従来の `Console.ReadLine()` に任せます。
+
+| `inputEncoding` | 行編集 |
+|---|---|
+| `utf-8` | **有効**（Emacs キーバインドが使える） |
+| `shift-jis`（既定） | 無効（コンソール標準の行編集） |
+| `default` | 無効 |
+
+`--line-editor` / `--no-line-editor` で強制的に切り替えられます。
+入力がリダイレクトされている場合（パイプ・ファイル）は常に `ReadLine()` を使います。
+
 ### ストリーミング表示
 
 応答はトークン単位でそのまま表示されます。`emitReasoning` が有効なら
@@ -496,6 +533,9 @@ python3 test_tau.py
 | 連続 NUL | 打ち切って案内するか |
 | `inputEncoding` | shift-jis / utf-8 / default を選べるか |
 | 別名 | `cp932` などを `shift-jis` として扱うか |
+| 行編集 | Emacs キーバインドが実装されているか |
+| 行編集の条件 | UTF-8 入力のときだけ有効になるか |
+| フォールバック | リダイレクト時は ReadLine を使うか |
 | `/model` | 任意のモデル名を受け付けるか |
 | セッションの分離 | `%APPDATA%\tau\sessions` に保存し、agentweb 側を汚さないか |
 | セッション形式 | `agentweb` と同じキーで保存されるか |
