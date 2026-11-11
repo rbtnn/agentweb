@@ -68,8 +68,6 @@ namespace Tau
         //
         // Windows では入出力のコードページが食い違うと日本語入力が壊れるため、
         // 対話コンソールのときは両方 UTF-8 に揃える。
-        // ただし、UTF-8 入力を実際に読めるか確認し、読めない環境では
-        // 従来どおりコンソール既定(CP932)で入力する。
         static void SetupConsoleEncoding()
         {
             try
@@ -92,13 +90,11 @@ namespace Tau
                 Encoding cur = Console.InputEncoding;
                 if (cur != null && cur.CodePage == 65001) return;   // すでに UTF-8
 
-                // 入力も UTF-8 に揃える。ここで失敗する/読めなくなる環境もあるため、
-                // 設定できなければ元のまま(CP932)で使う。
+                // 入力も UTF-8 に揃える(出力と食い違わせない)。
                 Console.InputEncoding = Encoding.UTF8;
             }
             catch
             {
-                // UTF-8 入力を設定できなければ、元のエンコーディングのままにする
                 try { Console.InputEncoding = Encoding.Default; } catch { }
             }
         }
@@ -2622,6 +2618,8 @@ namespace Tau
 
             if (resumed) PrintHistory(ctx);
 
+            int nulLost = 0;   // 連続して入力が NUL で失われた回数
+
             while (true)
             {
                 ConsoleUi.Accent("> ");
@@ -2639,6 +2637,7 @@ namespace Tau
                 int nulCount = Program.CountNul(line);
                 if (nulCount > 0 && nulCount >= line.Length)
                 {
+                    nulLost++;
                     ConsoleUi.Danger("⚠ The input was lost (all " + line.Length
                         + " characters became NUL).\n");
                     ConsoleUi.Dim("  The console input encoding does not match.\n");
@@ -2647,8 +2646,20 @@ namespace Tau
                     ConsoleUi.Dim("   - Set TAU_DEBUG=1 and check the reported input encoding\n");
                     ConsoleUi.Dim("   - Paste the text from a file:  tau --session <id> < input.txt\n");
                     ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
+
+                    if (nulLost >= 2)
+                    {
+                        // 何度も失われる場合は、ここで打ち切って原因を伝える
+                        ConsoleUi.Danger("  The input has been lost " + nulLost
+                            + " times in a row; stopping here.\n");
+                        ConsoleUi.Dim("  Change the console code page (chcp 65001) and start tau again,\n");
+                        ConsoleUi.Dim("  or write your text to a file and pipe it in:\n");
+                        ConsoleUi.Dim("    tau.exe < input.txt\n");
+                        break;
+                    }
                     continue;
                 }
+                nulLost = 0;
 
                 if (nulCount > 0)
                 {
@@ -3528,7 +3539,30 @@ namespace Tau
                 {
                     string ln = Console.ReadLine();
                     if (ln == null) break;
-                    ln = Program.SanitizeInput(ln);
+
+                    // 入力が NUL に化けていないか確認する。
+                    // 化けた場合に「空行」と誤判定して即終了すると、
+                    // 何も入力できていないのに反映されないように見える。
+                    int nulCount = Program.CountNul(ln);
+                    if (nulCount > 0)
+                    {
+                        string cleaned = Program.SanitizeInput(ln);
+                        if (cleaned.Length == 0)
+                        {
+                            ConsoleUi.Danger("  ⚠ This line became NUL and was lost ("
+                                + ln.Length + " characters).\n");
+                            ConsoleUi.Dim("    The console input encoding does not match.\n");
+                            ConsoleUi.Dim("    Try `chcp 65001` before starting tau,"
+                                + " or use Windows Terminal.\n");
+                            ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
+                            continue;   // 空行扱いにせず、入力をやり直してもらう
+                        }
+                        ConsoleUi.Danger("  ⚠ " + nulCount
+                            + " character(s) of this line became NUL and were dropped.\n");
+                        ln = cleaned;
+                    }
+
+                    // 空行で終了(ここでのみ終わる)
                     if (ln.Length == 0) break;
                     if (sb.Length > 0) sb.Append('\n');
                     sb.Append(ln);
@@ -3539,7 +3573,29 @@ namespace Tau
             else
             {
                 ConsoleUi.Dim("  Enter the new value (Enter to cancel): ");
-                value = Program.SanitizeInput(Console.ReadLine());
+                string raw = Console.ReadLine();
+                if (raw == null) { ConsoleUi.Dim("  Cancelled\n"); return; }
+
+                int nulCount = Program.CountNul(raw);
+                if (nulCount > 0)
+                {
+                    string cleaned = Program.SanitizeInput(raw);
+                    if (cleaned.Length == 0)
+                    {
+                        ConsoleUi.Danger("  ⚠ The input became NUL and was lost ("
+                            + raw.Length + " characters).\n");
+                        ConsoleUi.Dim("    The console input encoding does not match.\n");
+                        ConsoleUi.Dim("    Try `chcp 65001` before starting tau,"
+                            + " or use Windows Terminal.\n");
+                        ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
+                        return;
+                    }
+                    ConsoleUi.Danger("  ⚠ " + nulCount
+                        + " character(s) of the input became NUL and were dropped.\n");
+                    raw = cleaned;
+                }
+
+                value = raw;
                 if (value.Length == 0 && field.Kind != "string" && field.Kind != "secret")
                 {
                     ConsoleUi.Dim("  Cancelled\n");

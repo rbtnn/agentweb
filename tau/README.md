@@ -271,6 +271,22 @@ Windows で出力だけ UTF-8 にすると入出力のコードページが食�
 一部だけ NUL に化けた場合は、**欠落した文字数を表示**したうえで、
 残りの文字を送信します。
 
+**`/config edit` の複数行入力（システムプロンプトなど）でも同じ対処をします。**
+以前は NUL で空になった行を「入力終了の空行」と誤判定し、何も入力できていないのに
+即終了して反映されない、という状態になっていました。現在は:
+
+- NUL で全滅した行は**空行扱いにせず**、警告して入力をやり直してもらう
+- 一部だけ NUL の行は、欠落を表示して残りを受け付ける
+
+また、**連続して入力が失われる場合は打ち切って**対処方法を案内します（無限ループ防止）。
+
+```
+  The input has been lost 2 times in a row; stopping here.
+  Change the console code page (chcp 65001) and start tau again,
+  or write your text to a file and pipe it in:
+    tau.exe < input.txt
+```
+
 `tau --diag` でも現在の入出力エンコーディングを確認できます。
 
 ```
@@ -463,6 +479,9 @@ python3 test_tau.py
 | NUL 対策 | 入力の NUL 文字を取り除くか |
 | 入力消失 | NUL で全滅したときに警告するか |
 | 一部 NUL | 欠落を伝え、残りを送信するか |
+| `/config edit` の日本語 | 日本語のプロンプトが保存されるか |
+| NUL 行 | 空行と誤判定せず、やり直させるか |
+| 連続 NUL | 打ち切って案内するか |
 | `/model` | 任意のモデル名を受け付けるか |
 | セッションの分離 | `%APPDATA%\tau\sessions` に保存し、agentweb 側を汚さないか |
 | セッション形式 | `agentweb` と同じキーで保存されるか |

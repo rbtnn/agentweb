@@ -478,6 +478,51 @@ def main():
     else:
         bad("残りの文字が送信されていません: %r" % sent)
 
+    # ---- 6c-4. /config edit で日本語のシステムプロンプトを入力できる ----
+    # 以前は NUL で空行扱いになり、即終了して反映されなかった。
+    edit_cfg = os.path.join(work, "edit.json")
+    with open(edit_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:9/v1", "llmApiKey": "k",
+                   "model": "m", "allowTools": False, "useSystemProxy": False}, f)
+    jp_prompt = "あなたは親切なアシスタントです。日本語で答えてください。"
+    out = run_tau("/config edit\n15\n" + jp_prompt + "\n\n/exit\n",
+                  args=["--config", edit_cfg])
+    if "updated" in out:
+        ok("/config edit でシステムプロンプトを変更できます")
+    else:
+        bad("/config edit が反映されていません: " + out[-400:])
+    with open(edit_cfg, encoding="utf-8-sig") as f:
+        ed = json.load(f)
+    if ed.get("systemPrompt") == jp_prompt:
+        ok("/config edit で日本語のシステムプロンプトがそのまま保存されます")
+    else:
+        bad("日本語のシステムプロンプトが保存されていません: %r"
+            % ed.get("systemPrompt"))
+
+    # NUL に化けた行は「空行」と誤判定せず、警告して入力をやり直させる
+    with open(edit_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:9/v1", "llmApiKey": "k",
+                   "model": "m", "allowTools": False, "useSystemProxy": False}, f)
+    out = run_tau("/config edit\n15\n\x00\x00\x00\x00\n" + jp_prompt
+                  + "\n\n/exit\n", args=["--config", edit_cfg])
+    if "became NUL and was lost" in out:
+        ok("/config edit で NUL 化した行を空行扱いにしません")
+    else:
+        bad("/config edit で NUL 行が空行扱いになっています: " + out[-400:])
+    with open(edit_cfg, encoding="utf-8-sig") as f:
+        ed2 = json.load(f)
+    if ed2.get("systemPrompt") == jp_prompt:
+        ok("NUL 行のあとに入力した日本語が反映されます")
+    else:
+        bad("NUL 行後の入力が反映されていません: %r" % ed2.get("systemPrompt"))
+
+    # 連続して失われる場合は打ち切る
+    out = run_tau("\x00\x00\x00\n\x00\x00\x00\n")
+    if "lost 2 times in a row" in out:
+        ok("連続して入力が失われたら打ち切って案内します")
+    else:
+        bad("連続 NUL で打ち切っていません: " + out[-400:])
+
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
     multi_port = multi_srv.server_address[1]
