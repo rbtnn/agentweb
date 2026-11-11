@@ -32,7 +32,10 @@ namespace Tau
             // (\u0000) に化けることがある(dotnet/runtime#43295)。
             // 入出力を同じコードページに揃えるのが安全なので、
             // 対話コンソールのときは両方 UTF-8 にする。
-            SetupConsoleEncoding();
+            // 設定ファイルを先に読んで、入力エンコーディングの指定を知る必要がある。
+            // (引数解析の後で Config を作るため、ここでは既定値を仮に使い、
+            //  Config 生成後に改めて適用する)
+            SetupConsoleEncoding(null);
 
             string configPath = "";
             string sessionArg = "";
@@ -56,6 +59,9 @@ namespace Tau
 
             Config cfg = new Config(configPath);
 
+            // 設定ファイルの inputEncoding に従って、入力を設定し直す。
+            SetupConsoleEncoding(cfg);
+
             if (diag) { Diagnostics.Run(cfg); return; }
 
             Chat chat = new Chat(cfg);
@@ -68,7 +74,52 @@ namespace Tau
         //
         // Windows では入出力のコードページが食い違うと日本語入力が壊れるため、
         // 対話コンソールのときは両方 UTF-8 に揃える。
-        static void SetupConsoleEncoding()
+        // 設定名 → Encoding を解決する。解決できなければ null。
+        public static Encoding ResolveEncoding(string name)
+        {
+            if (name == null) return null;
+            string n = name.Trim().ToLowerInvariant().Replace("_", "-").Replace(" ", "");
+            switch (n)
+            {
+                case "":
+                case "default":
+                case "auto":
+                    return null;   // 変更しない
+                case "utf-8":
+                case "utf8":
+                case "65001":
+                    return Encoding.UTF8;
+                case "shift-jis":
+                case "shiftjis":
+                case "sjis":
+                case "cp932":
+                case "932":
+                case "windows-31j":
+                    try { return Encoding.GetEncoding(932); }
+                    catch { return null; }
+                default:
+                    // 数値のコードページ指定も受け付ける
+                    {
+                        int cp;
+                        if (int.TryParse(n, out cp))
+                        {
+                            try { return Encoding.GetEncoding(cp); }
+                            catch { return null; }
+                        }
+                    }
+                    return null;
+            }
+        }
+
+        // コンソールの入出力エンコーディングを設定する。
+        //
+        // cfg が null の場合は既定(shift-jis)として扱う。
+        // 出力は常に UTF-8(日本語の表示が化けない)。
+        // 入力は cfg.InputEncoding に従う:
+        //   - shift-jis … Windows のコンソール既定。日本語入力が安定する
+        //   - utf-8     … コンソールが UTF-8 のとき
+        //   - default   … 触らない
+        static void SetupConsoleEncoding(Config cfg)
         {
             try
             {
@@ -83,19 +134,24 @@ namespace Tau
             catch { }
             if (redirected) return;
 
-            if (Path.DirectorySeparatorChar != '\\') return;   // Windows のみ
+            string want = (cfg != null && cfg.InputEncoding != null && cfg.InputEncoding.Trim().Length > 0)
+                ? cfg.InputEncoding
+                : "shift-jis";
+
+            Encoding enc = ResolveEncoding(want);
+            if (enc == null)
+            {
+                // "default" 指定、または解決できなかった場合は変更しない
+                return;
+            }
 
             try
             {
-                Encoding cur = Console.InputEncoding;
-                if (cur != null && cur.CodePage == 65001) return;   // すでに UTF-8
-
-                // 入力も UTF-8 に揃える(出力と食い違わせない)。
-                Console.InputEncoding = Encoding.UTF8;
+                Console.InputEncoding = enc;
             }
             catch
             {
-                try { Console.InputEncoding = Encoding.Default; } catch { }
+                // 設定できない場合は何もしない(コンソール既定のまま)
             }
         }
 
@@ -219,6 +275,11 @@ namespace Tau
         public bool UseSystemProxy;
 
         public string SystemPrompt;
+        // コンソール入力のエンコーディング。
+        //   "utf-8"     … UTF-8 (CP65001)
+        //   "shift-jis" … Shift-JIS (CP932)。Windows の既定で、日本語入力が安定する
+        //   "default"   … コンソール/OS の既定に任せる(変更しない)
+        public string InputEncoding;
         public string ConfigPath;          // 設定ファイルのパス(保存先)
 
         public Config(string configPathArg)
@@ -239,6 +300,8 @@ namespace Tau
             ReserveTokens = SafeInt(Env("LLM_RESERVE_TOKENS", "12000"), 12000);
             KeepRecentTokens = SafeInt(Env("LLM_KEEP_RECENT_TOKENS", "20000"), 20000);
 
+
+            InputEncoding = Env("TAU_INPUT_ENCODING", "shift-jis");
 
             SystemPrompt = Env("AI_SYSTEM_PROMPT",
                 "You are an AI agent that runs in the console."
@@ -330,6 +393,7 @@ namespace Tau
             if (Has(m, "proxyPass")) ProxyPass = Json.AsString(Get(m, "proxyPass"));
             if (Has(m, "useSystemProxy")) UseSystemProxy = AsBool(Get(m, "useSystemProxy"));
             if (Has(m, "systemPrompt")) SystemPrompt = Json.AsString(Get(m, "systemPrompt"));
+            if (Has(m, "inputEncoding")) InputEncoding = Json.AsString(Get(m, "inputEncoding"));
         }
 
         public Dictionary<string, object> ToDict()
@@ -350,6 +414,7 @@ namespace Tau
             m["proxyPass"] = ProxyPass;
             m["useSystemProxy"] = UseSystemProxy;
             m["systemPrompt"] = SystemPrompt;
+            m["inputEncoding"] = InputEncoding;
             return m;
         }
 
@@ -3356,8 +3421,9 @@ namespace Tau
         {
             public string Key;        // 設定ファイルのキー
             public string Label;      // 表示名
-            public string Kind;       // "string" / "int" / "bool" / "secret"
+            public string Kind;       // "string" / "int" / "bool" / "secret" / "text" / "choice"
             public string Help;       // 補足
+            public string[] Choices;  // Kind が "choice" のときの選択肢
         }
 
         public static readonly Field[] Fields = new Field[]
@@ -3392,6 +3458,9 @@ namespace Tau
                 Help = "Proxy authentication password" },
             new Field { Key = "systemPrompt", Label = "System Prompt", Kind = "text",
                 Help = "System prompt (multi-line)" },
+            new Field { Key = "inputEncoding", Label = "Input Encoding", Kind = "choice",
+                Help = "Console input encoding: shift-jis (cp932) / utf-8 / default",
+                Choices = new string[] { "shift-jis", "utf-8", "default" } },
         };
 
         public static Field Find(string key)
@@ -3443,6 +3512,32 @@ namespace Tau
                         else if (f.Key == "emitReasoning") cfg.EmitReasoning = b;
                         else if (f.Key == "useSystemProxy") cfg.UseSystemProxy = b;
                         return true;
+                    }
+                case "choice":
+                    {
+                        if (f.Choices == null || f.Choices.Length == 0) return false;
+                        string s2 = (raw ?? "").Trim().ToLowerInvariant().Replace("_", "-");
+                        for (int i = 0; i < f.Choices.Length; i++)
+                        {
+                            if (f.Choices[i].ToLowerInvariant() == s2)
+                            {
+                                if (f.Key == "inputEncoding") cfg.InputEncoding = f.Choices[i];
+                                return true;
+                            }
+                        }
+                        // よく使う別名を受け付ける
+                        Encoding enc = Program.ResolveEncoding(raw);
+                        if (enc != null && f.Key == "inputEncoding")
+                        {
+                            cfg.InputEncoding = (enc.CodePage == 65001) ? "utf-8" : "shift-jis";
+                            return true;
+                        }
+                        if (f.Key == "inputEncoding" && s2 == "default")
+                        {
+                            cfg.InputEncoding = "default";
+                            return true;
+                        }
+                        return false;
                     }
                 case "int":
                     {
@@ -3512,6 +3607,8 @@ namespace Tau
                 Console.WriteLine("    " + (i + 1).ToString().PadLeft(2) + ". "
                     + Pad(f.Key) + " = " + Display(cfg, f));
                 ConsoleUi.Dim("        " + f.Help + "\n");
+                if (f.Kind == "choice" && f.Choices != null)
+                    ConsoleUi.Dim("        choices: " + string.Join(" / ", f.Choices) + "\n");
             }
             Console.WriteLine();
             ConsoleUi.Dim("  Enter the number of the field to change (Enter to cancel): ");
@@ -3569,6 +3666,32 @@ namespace Tau
                 }
                 value = sb.ToString();
                 if (value.Trim().Length == 0) { ConsoleUi.Dim("  Cancelled\n"); return; }
+            }
+            else if (field.Kind == "choice")
+            {
+                ConsoleUi.Dim("  Enter the new value (Enter to cancel):\n");
+                for (int i = 0; i < field.Choices.Length; i++)
+                    ConsoleUi.Dim("    " + (i + 1) + ". " + field.Choices[i] + "\n");
+                ConsoleUi.Dim("  number or name: ");
+                string raw = Console.ReadLine();
+                if (raw == null) { ConsoleUi.Dim("  Cancelled\n"); return; }
+
+                int nulCount = Program.CountNul(raw);
+                if (nulCount > 0)
+                {
+                    ConsoleUi.Danger("  ⚠ The input became NUL and was lost.\n");
+                    ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
+                    return;
+                }
+                raw = raw.Trim();
+
+                // 番号でも名前でも受け付ける
+                int pickNo;
+                if (int.TryParse(raw, out pickNo) && pickNo >= 1 && pickNo <= field.Choices.Length)
+                    raw = field.Choices[pickNo - 1];
+
+                value = raw;
+                if (value.Length == 0) { ConsoleUi.Dim("  Cancelled\n"); return; }
             }
             else
             {

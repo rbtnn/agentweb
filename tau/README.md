@@ -175,7 +175,8 @@ TAU_CONFIG
   "proxyUser": "",
   "proxyPass": "",
   "useSystemProxy": true,
-  "systemPrompt": ""
+  "systemPrompt": "",
+  "inputEncoding": "shift-jis"
 }
 ```
 
@@ -240,17 +241,28 @@ TAU_CONFIG
 
 ### 日本語の入出力
 
-`SetupConsoleEncoding()` がコンソールの入出力エンコーディングを設定します。
+出力は常に **UTF-8**（日本語の表示が化けない）。
+**入力のエンコーディングは `inputEncoding` 設定で選べます。**
 
-**入出力のコードページを食い違わせてはいけません。**
-Windows で出力だけ UTF-8 にすると入出力のコードページが食い違い、
-**日本語入力が NUL 文字（`\u0000`）に化けます**（dotnet/runtime#43295）。
+| `inputEncoding` | 内容 |
+|---|---|
+| **`shift-jis`**（既定） | Shift-JIS（CP932）。**Windows のコンソール既定で、日本語入力が安定** |
+| `utf-8` | UTF-8（CP65001）。コンソールが UTF-8 のとき |
+| `default` | コンソール/OS の既定に任せる（変更しない） |
 
-そのため `tau` は:
+```
+tau.json:
+  "inputEncoding": "shift-jis"
+```
 
-- 出力を UTF-8 に設定（日本語が化けない）
-- **対話コンソールなら入力も UTF-8 に揃える**
-- **入力がリダイレクトされている場合は入力に触らない**（パイプ・ファイル入力はそのまま読める）
+**Shift-JIS が既定です。** Windows のコンソールは CP932 で動いていることが多く、
+入力側を UTF-8 にすると日本語が NUL 文字（`\u0000`）に化けてしまいます
+（dotnet/runtime#43295）。出力は UTF-8 でも、入力は CP932 のままにしておくのが
+最も安定します。
+
+- 入力が**リダイレクト**されている場合は設定に関係なく触りません（パイプ・ファイル入力）
+- 設定は `/set inputEncoding utf-8` または `/config edit` の **16. Input Encoding** で変更できます
+- `cp932` / `sjis` / `65001` / コードページ番号などの別名も受け付けます
 
 #### 入力が NUL に化けた場合
 
@@ -482,6 +494,8 @@ python3 test_tau.py
 | `/config edit` の日本語 | 日本語のプロンプトが保存されるか |
 | NUL 行 | 空行と誤判定せず、やり直させるか |
 | 連続 NUL | 打ち切って案内するか |
+| `inputEncoding` | shift-jis / utf-8 / default を選べるか |
+| 別名 | `cp932` などを `shift-jis` として扱うか |
 | `/model` | 任意のモデル名を受け付けるか |
 | セッションの分離 | `%APPDATA%\tau\sessions` に保存し、agentweb 側を汚さないか |
 | セッション形式 | `agentweb` と同じキーで保存されるか |

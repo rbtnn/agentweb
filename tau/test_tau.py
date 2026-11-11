@@ -396,6 +396,19 @@ def main():
         ok("コンソールのエンコーディングを一括設定しています")
     else:
         bad("SetupConsoleEncoding がありません")
+    # 入力エンコーディングを設定で選べること
+    if "inputEncoding" in tls_src and "ResolveEncoding" in tls_src:
+        ok("入力エンコーディングを設定で選択できます")
+    else:
+        bad("入力エンコーディングの設定がありません")
+    if "932" in tls_src and "shift-jis" in tls_src:
+        ok("Shift-JIS (CP932) を選択できます")
+    else:
+        bad("Shift-JIS の指定がありません")
+    if '"utf-8"' in tls_src:
+        ok("UTF-8 を選択できます")
+    else:
+        bad("UTF-8 の指定がありません")
     if "IsInputRedirected" in tls_src and "return;" in tls_src:
         ok("入力リダイレクト時はエンコーディングを変更しません")
     else:
@@ -522,6 +535,52 @@ def main():
         ok("連続して入力が失われたら打ち切って案内します")
     else:
         bad("連続 NUL で打ち切っていません: " + out[-400:])
+
+    # ---- 6c-5. 入力エンコーディングの設定 ----
+    ie_cfg = os.path.join(work, "ie.json")
+    with open(ie_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:9/v1", "llmApiKey": "k",
+                   "model": "m", "allowTools": False, "useSystemProxy": False}, f)
+    out = run_tau("/config\n/exit\n", args=["--config", ie_cfg])
+    if "inputEncoding" in out:
+        ok("/config に inputEncoding が表示されます")
+    else:
+        bad("/config に inputEncoding がありません: " + out[-400:])
+
+    for name in ("shift-jis", "utf-8", "default"):
+        out = run_tau("/set inputEncoding " + name + "\n/exit\n",
+                      args=["--config", ie_cfg])
+        with open(ie_cfg, encoding="utf-8-sig") as f:
+            saved_ie = json.load(f).get("inputEncoding")
+        if saved_ie == name:
+            ok("/set inputEncoding %s が保存されます" % name)
+        else:
+            bad("/set inputEncoding %s が保存されていません: %r" % (name, saved_ie))
+
+    # 別名も受け付ける
+    out = run_tau("/set inputEncoding cp932\n/exit\n", args=["--config", ie_cfg])
+    with open(ie_cfg, encoding="utf-8-sig") as f:
+        saved_ie = json.load(f).get("inputEncoding")
+    if saved_ie == "shift-jis":
+        ok("/set inputEncoding cp932 は shift-jis として扱われます")
+    else:
+        bad("cp932 の別名が効いていません: %r" % saved_ie)
+
+    # 不正な値は拒否
+    out = run_tau("/set inputEncoding bogus\n/exit\n", args=["--config", ie_cfg])
+    if "Invalid value" in out:
+        ok("/set inputEncoding は不正な値を拒否します")
+    else:
+        bad("/set inputEncoding の入力チェックがありません")
+
+    # /config edit の選択肢
+    out = run_tau("/config edit\n16\n1\n/exit\n", args=["--config", ie_cfg])
+    with open(ie_cfg, encoding="utf-8-sig") as f:
+        saved_ie = json.load(f).get("inputEncoding")
+    if "choices: shift-jis / utf-8 / default" in out and saved_ie == "shift-jis":
+        ok("/config edit で選択肢から入力エンコーディングを選べます")
+    else:
+        bad("/config edit の選択肢が想定と違います: %r" % saved_ie)
 
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
