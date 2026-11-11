@@ -101,6 +101,40 @@ class MockMulti(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+MD_REPLY = (
+    "# Heading1\n## Heading2\n\n"
+    "This is **bold** and *italic* and `code`.\n\n"
+    "- item1\n- item2\n\n"
+    "1. num1\n2. num2\n\n"
+    "| Name | Qty | Note |\n|:-----|----:|:----:|\n"
+    "| apple | 3 | red |\n| mikan | 10 | orange |\n\n"
+    "> quoted text\n\n"
+    "```python\nprint(1)\n```\n\n"
+    "---\n[link](https://example.com)\n"
+)
+
+
+class MockMarkdown(BaseHTTPRequestHandler):
+    """Markdown を返すモック(整形表示の検証用)。"""
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(n)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for d in ({"role": "assistant"}, {"content": MD_REPLY}):
+            c = {"id": "c", "object": "chat.completion.chunk", "created": 1,
+                 "model": "m", "choices": [{"index": 0, "delta": d,
+                                            "finish_reason": None}]}
+            self.wfile.write(("data: " + json.dumps(c, ensure_ascii=False) + "\n\n").encode())
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+
 class MockHttpError(BaseHTTPRequestHandler):
     """HTTP エラー(401 など)を返すモック。"""
     protocol_version = "HTTP/1.1"
@@ -581,6 +615,71 @@ def main():
         ok("/config edit で選択肢から入力エンコーディングを選べます")
     else:
         bad("/config edit の選択肢が想定と違います: %r" % saved_ie)
+
+    # ---- 6c-6. Markdown の整形表示 ----
+    md_srv = HTTPServer(("127.0.0.1", 0), MockMarkdown)
+    md_port = md_srv.server_address[1]
+    threading.Thread(target=md_srv.serve_forever, daemon=True).start()
+    md_cfg = os.path.join(work, "md.json")
+    with open(md_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % md_port,
+                   "llmApiKey": "k", "model": "m", "allowTools": False,
+                   "useSystemProxy": False}, f)
+    out = run_tau("テスト\n/exit\n", args=["--config", md_cfg])
+    md_srv.shutdown(); md_srv.server_close()
+
+    # 見出し記号が消えていること
+    if "# Heading1" not in out and "Heading1" in out:
+        ok("見出しの # が除去されて表示されます")
+    else:
+        bad("見出しが Markdown のまま出力されています")
+    # 太字・斜体の記号が消えていること
+    if "**bold**" not in out and "bold" in out:
+        ok("**太字** の記号が除去されて表示されます")
+    else:
+        bad("太字が Markdown のまま出力されています")
+    if "`code`" not in out and "code" in out:
+        ok("インラインコードの ` が除去されて表示されます")
+    else:
+        bad("インラインコードが Markdown のまま出力されています")
+    # 表がボーダー文字で整形されていること
+    if "┌" in out and "┬" in out and "└" in out and "│" in out:
+        ok("表がボーダー文字(罫線)で整形されます")
+    else:
+        bad("表が罫線で整形されていません: " + out[-500:])
+    if "|:-----|" not in out and "| Name |" not in out:
+        ok("表の Markdown 記法がそのまま出力されません")
+    else:
+        bad("表が Markdown のまま出力されています")
+    # 箇条書きが「・」になること
+    if "・item1" in out:
+        ok("箇条書きが・で表示されます")
+    else:
+        bad("箇条書きが整形されていません")
+    # コードブロックが枠付きで表示されること
+    if "┌ python" in out or "┌─ python" in out:
+        ok("コードブロックが枠付きで表示されます")
+    else:
+        bad("コードブロックが枠付きになっていません")
+    # 引用が縦線で表示されること
+    if "│ quoted text" in out:
+        ok("引用が縦線で表示されます")
+    else:
+        bad("引用が整形されていません")
+    # リンクが text (url) 形式になること
+    if "[link](https://example.com)" not in out and "link" in out \
+       and "https://example.com" in out:
+        ok("リンクが text (url) 形式で表示されます")
+    else:
+        bad("リンクが整形されていません")
+    # 水平線が罫線になること
+    # 長い罫線(40 桁以上)は水平線の整形結果だけ
+    rule = [ln for ln in out.split("\n")
+            if len(ln.strip()) >= 40 and set(ln.strip()) == set("─")]
+    if rule:
+        ok("水平線が罫線で表示されます")
+    else:
+        bad("水平線が整形されていません")
 
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
