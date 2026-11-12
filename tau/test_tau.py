@@ -221,10 +221,13 @@ def main():
               "LLM_EMIT_REASONING"):
         env.pop(k, None)
 
-    def run_tau(stdin_text, args=None, timeout=60):
+    def run_tau(stdin_text, args=None, timeout=60, extra_env=None):
         cmd = ["mono", exe] + (args or [])
+        e = dict(env)
+        if extra_env:
+            e.update(extra_env)
         p = subprocess.run(cmd, input=stdin_text, capture_output=True,
-                           text=True, env=env, timeout=timeout,
+                           text=True, env=e, timeout=timeout,
                            cwd=os.path.dirname(exe))
         return p.stdout + p.stderr
 
@@ -747,6 +750,67 @@ def main():
         ok("Windows の実際のコードページを確認します")
     else:
         bad("コンソール コードページの確認がありません")
+
+    # ---- 6c-9. 254 文字の上限を超える入力 ----
+    # Console.ReadLine() は .NET Framework で 256 バイトのバッファを使い、
+    # 254 文字までしか読めない。全角と半角が混在すると文字数ではなく
+    # バイト数で上限に達し、255 バイト前後で切れてしまう。
+    if "SetupInputBuffer" in tls_src and "OpenStandardInput" in tls_src \
+       and "READLINE_BUFFER_SIZE" in tls_src:
+        ok("入力バッファを 64KB に広げます(254 文字の上限を回避)")
+    else:
+        bad("入力のバッファ拡張がありません")
+    if "Console.SetIn" in tls_src:
+        ok("Console.In を大きなバッファの StreamReader に差し替えます")
+    else:
+        bad("Console.In の差し替えがありません")
+    # 差し替えは起動時に 1 回だけ行い、すべての ReadLine が恩恵を受けること
+    if "SetupInputBuffer();" in tls_src:
+        ok("起動時にバッファ拡張を適用します")
+    else:
+        bad("起動時に適用されていません")
+    # 入力の読み取りは Console.ReadLine のまま(コンソールの行編集を維持)
+    ml = tls_src[tls_src.index("public static Result ReadMultiLine"):
+                 tls_src.index("public static Result ReadMultiLine") + 2500]
+    if "Console.ReadLine()" in ml:
+        ok("/config edit の複数行入力も Console.ReadLine を使います")
+    else:
+        bad("複数行入力が Console.ReadLine を使っていません")
+
+    # 実際に 254 バイトを超える混在プロンプトが欠けないこと
+    def make_mixed(nbytes):
+        t = ""
+        i = 0
+        while len(t.encode("utf-8")) < nbytes:
+            t += "あA" if i % 2 == 0 else "い1"
+            i += 1
+        return t
+
+    # 他のテストのセッションを壊さないよう、専用のデータディレクトリを使う
+    long_home = os.path.join(work, "longhome")
+    long_xdg = os.path.join(long_home, ".config")
+    if not os.path.isdir(os.path.join(long_xdg, "tau", "sessions")):
+        os.makedirs(os.path.join(long_xdg, "tau", "sessions"))
+    for nbytes in (255, 300, 512):
+        for fn in glob.glob(os.path.join(long_xdg, "tau", "sessions", "*.json")):
+            os.remove(fn)
+        text = make_mixed(nbytes)
+        run_tau(text + "\n/exit\n", args=["--config", long_cfg],
+                extra_env={"HOME": long_home, "XDG_CONFIG_HOME": long_xdg})
+        saved = None
+        for fn in glob.glob(os.path.join(long_xdg, "tau", "sessions", "*.json")):
+            try:
+                d = json.load(open(fn, encoding="utf-8-sig"))
+                for m in d.get("messages", []):
+                    if m.get("role") == "user" and len(m.get("content") or "") > 50:
+                        saved = m["content"]
+            except Exception:
+                pass
+        if saved == text:
+            ok("全角半角混在 %d バイトの入力が欠けません" % len(text.encode("utf-8")))
+        else:
+            bad("全角半角混在 %d バイトの入力が欠けます (保存 %s 文字)"
+                % (len(text.encode("utf-8")), len(saved) if saved else 0))
 
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)

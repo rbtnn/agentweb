@@ -65,6 +65,9 @@ namespace Tau
             // 設定ファイルの inputEncoding に従って、入力を設定し直す。
             SetupConsoleEncoding(cfg);
 
+            // 入力バッファを広げる(254 文字の上限を回避する)。
+            SetupInputBuffer();
+
             // 行編集(Emacs キーバインド)を使えるか判定する。
             LineEditor.Configure(cfg);
 
@@ -128,6 +131,42 @@ namespace Tau
         //   - shift-jis … Windows のコンソール既定。日本語入力が安定する
         //   - utf-8     … コンソールが UTF-8 のとき
         //   - default   … 触らない
+        // Console.ReadLine() は .NET Framework で既定 256 バイトの入力バッファを使う。
+        // この 256 には CR/LF も含まれるため 254 文字までしか読めず、
+        // 全角と半角が混在すると文字数ではなくバイト数で上限に達するため、
+        // 255 バイト前後の日本語が途中で切れて送信される。
+        //
+        // Console.In を大きなバッファの StreamReader に差し替えると、
+        // 既存の Console.ReadLine() 呼び出しすべてがその恩恵を受ける。
+        // (コンソールの行編集・IME はそのまま使える)
+        static void SetupInputBuffer()
+        {
+            const int READLINE_BUFFER_SIZE = 64 * 1024;   // 64KB
+
+            try
+            {
+                if (Console.IsInputRedirected)
+                {
+                    // リダイレクト時は大きなバッファで読み、途中で切れないようにする
+                    Stream stdin = Console.OpenStandardInput(READLINE_BUFFER_SIZE);
+                    Console.SetIn(new StreamReader(stdin, Console.InputEncoding,
+                                                   false, READLINE_BUFFER_SIZE));
+                }
+                else
+                {
+                    // 対話時はコンソールの行編集を使いたいので、
+                    // 入力バッファだけを大きくする
+                    Stream stdin = Console.OpenStandardInput(READLINE_BUFFER_SIZE);
+                    Console.SetIn(new StreamReader(stdin, Console.InputEncoding,
+                                                   false, READLINE_BUFFER_SIZE));
+                }
+            }
+            catch
+            {
+                // 設定できない環境では既定のままにする
+            }
+        }
+
         static void SetupConsoleEncoding(Config cfg)
         {
             try
@@ -199,7 +238,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-15 readline-only";
+        public const string BuildStamp = "2026-02-16 wide-input";
 
         internal static void PrintVersion()
         {
@@ -2732,6 +2771,7 @@ namespace Tau
 
                 if (LlmClient.DebugOn)
                     ConsoleUi.Dim("  [input] length=" + (line == null ? -1 : line.Length)
+                        + " bytes=" + (line == null ? -1 : Encoding.UTF8.GetByteCount(line))
                         + (line == null ? " (null)" : "") + "\n");
 
                 if (line == null) break;   // Ctrl-G / Ctrl-D / EOF
