@@ -140,27 +140,35 @@ namespace Tau
         // Console.In を大きなバッファの StreamReader に差し替えると、
         // 既存の Console.ReadLine() 呼び出しすべてがその恩恵を受ける。
         // (コンソールの行編集・IME はそのまま使える)
+        internal static bool IsWindows()
+        {
+            try
+            {
+                int p = (int)Environment.OSVersion.Platform;
+                return p == 1 || p == 2;
+            }
+            catch { return false; }
+        }
+
         static void SetupInputBuffer()
         {
             const int READLINE_BUFFER_SIZE = 64 * 1024;   // 64KB
 
             try
             {
-                if (Console.IsInputRedirected)
-                {
-                    // リダイレクト時は大きなバッファで読み、途中で切れないようにする
-                    Stream stdin = Console.OpenStandardInput(READLINE_BUFFER_SIZE);
-                    Console.SetIn(new StreamReader(stdin, Console.InputEncoding,
-                                                   false, READLINE_BUFFER_SIZE));
-                }
-                else
-                {
-                    // 対話時はコンソールの行編集を使いたいので、
-                    // 入力バッファだけを大きくする
-                    Stream stdin = Console.OpenStandardInput(READLINE_BUFFER_SIZE);
-                    Console.SetIn(new StreamReader(stdin, Console.InputEncoding,
-                                                   false, READLINE_BUFFER_SIZE));
-                }
+                // Windows の対話コンソールでは Console.In を差し替えない。
+                // 差し替えると ReadFile 経由になり、コンソールの行編集
+                // (ENABLE_LINE_INPUT)を通らないため Ctrl-V の貼り付けが
+                // 効かなくなる。対話時は ReadConsoleW を直接使うので
+                // (ReadLineFallback を参照)、ここでは触らない。
+                bool interactiveConsole = false;
+                try { interactiveConsole = !Console.IsInputRedirected; } catch { }
+                if (interactiveConsole && IsWindows()) return;
+
+                // リダイレクト時は大きなバッファで読み、途中で切れないようにする
+                Stream stdin = Console.OpenStandardInput(READLINE_BUFFER_SIZE);
+                Console.SetIn(new StreamReader(stdin, Console.InputEncoding,
+                                               false, READLINE_BUFFER_SIZE));
             }
             catch
             {
@@ -264,7 +272,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-17 ctrl-c-cancel";
+        public const string BuildStamp = "2026-02-18 clipboard";
 
         internal static void PrintVersion()
         {
@@ -2875,7 +2883,28 @@ namespace Tau
                     ConsoleUi.Info("input encoding: " + Program.SafeInputEncoding());
                 }
 
-                line = Program.SanitizeInput(line).Trim();
+                line = Program.SanitizeInput(line);
+
+                // Ctrl-V が SYN(0x16)として届いた場合は、クリップボードの
+                // 内容に置き換える(コンソールの行編集が使えない環境向け)。
+                if (line.IndexOf('\u0016') >= 0)
+                {
+                    string clip = LineEditor.GetClipboardText();
+                    if (clip != null && clip.Length > 0)
+                    {
+                        // 貼り付け先が 1 行だけなので、改行は空白にする
+                        clip = clip.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
+                        line = line.Replace("\u0016", clip);
+                    }
+                    else
+                    {
+                        ConsoleUi.Danger("⚠ Ctrl-V: the clipboard is empty"
+                            + " or could not be read.\n");
+                        continue;
+                    }
+                }
+
+                line = line.Trim();
                 if (line.Length == 0) continue;   // 空行は何もしない
 
                 if (line.StartsWith("/"))
@@ -4055,11 +4084,145 @@ namespace Tau
             return result;
         }
 
+        // ------------------------------------------------------------------
+        //  Windows のコンソールから 1 行読む。
+        //
+        //  Console.In は、入力エンコーディングが Unicode 以外だと ReadFile を
+        //  使う。ReadFile はコンソールの行編集(ENABLE_LINE_INPUT)を通らないため、
+        //  Ctrl-V での貼り付けが効かない。ReadConsoleW を使うと行編集が働き、
+        //  貼り付け・矢印キー・IME がそのまま使える。
+        //
+        //  バッファを自分で確保するので、254 文字の上限もない。
+        // ------------------------------------------------------------------
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        static extern bool ReadConsoleW(IntPtr hConsoleInput, StringBuilder lpBuffer,
+            uint nNumberOfCharsToRead, out uint lpNumberOfCharsRead, IntPtr pInputControl);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
+        const int STD_INPUT_HANDLE = -10;
+        const uint ENABLE_LINE_INPUT = 0x0002;
+        const uint ENABLE_ECHO_INPUT = 0x0004;
+        const uint ENABLE_PROCESSED_INPUT = 0x0001;
+
+        // コンソールの行編集(貼り付けが効く状態)を有効にする
+        static void EnsureConsoleLineInput()
+        {
+            if (!Program.IsWindows()) return;
+            try
+            {
+                IntPtr h = GetStdHandle(STD_INPUT_HANDLE);
+                uint mode;
+                if (!GetConsoleMode(h, out mode)) return;
+                uint want = mode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT;
+                if (want != mode) SetConsoleMode(h, want);
+            }
+            catch { }
+        }
+
+        // Windows のコンソールから 1 行読む。失敗したら null。
+        static string ReadConsoleLineWin(int bufferSize)
+        {
+            if (!Program.IsWindows()) return null;
+            try
+            {
+                if (Console.IsInputRedirected) return null;   // リダイレクト時は使わない
+
+                EnsureConsoleLineInput();
+
+                IntPtr h = GetStdHandle(STD_INPUT_HANDLE);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return null;
+
+                StringBuilder sb = new StringBuilder(bufferSize + 2);
+                uint read;
+                if (!ReadConsoleW(h, sb, (uint)bufferSize, out read, IntPtr.Zero)) return null;
+                if (read == 0) return null;   // EOF
+
+                string s = sb.ToString();
+                // 行末の改行を除く
+                if (s.EndsWith("\r\n")) s = s.Substring(0, s.Length - 2);
+                else if (s.EndsWith("\n") || s.EndsWith("\r"))
+                    s = s.Substring(0, s.Length - 1);
+                return s;
+            }
+            catch { return null; }
+        }
+
         static string ReadLineFallback(string prompt)
         {
             Console.Write(prompt);
-            try { return Console.ReadLine(); }
+            try
+            {
+                // Windows のコンソールでは ReadConsoleW を使う。
+                // 行編集が働くので Ctrl-V の貼り付けがそのまま使える。
+                string win = ReadConsoleLineWin(64 * 1024);
+                if (win != null) return win;
+
+                // それ以外(リダイレクト・Unix 系)は Console.ReadLine に任せる
+                return Console.ReadLine();
+            }
             catch { return null; }
+        }
+
+        // ------------------------------------------------------------------
+        //  クリップボードからの貼り付け
+        //
+        //  コンソールの行編集が無効な環境では Ctrl-V が SYN(0x16)として
+        //  届く。その場合はクリップボードを直接読んで貼り付ける。
+        // ------------------------------------------------------------------
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        static extern bool CloseClipboard();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr GetClipboardData(uint uFormat);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalLock(IntPtr hMem);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GlobalUnlock(IntPtr hMem);
+
+        const uint CF_UNICODETEXT = 13;
+
+        // クリップボードのテキストを取得する。取得できなければ null。
+        public static string GetClipboardText()
+        {
+            if (!Program.IsWindows()) return null;
+            try
+            {
+                if (!OpenClipboard(IntPtr.Zero)) return null;
+                IntPtr handle = GetClipboardData(CF_UNICODETEXT);
+                if (handle == IntPtr.Zero) return null;
+
+                IntPtr ptr = GlobalLock(handle);
+                if (ptr == IntPtr.Zero) return null;
+                try
+                {
+                    return System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr);
+                }
+                finally
+                {
+                    GlobalUnlock(handle);
+                }
+            }
+            catch { return null; }
+            finally
+            {
+                try { CloseClipboard(); } catch { }
+            }
         }
 
         // 複数行を読む。空行だけで確定。Ctrl-G で中止。

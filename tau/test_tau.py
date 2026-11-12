@@ -812,6 +812,29 @@ def main():
             bad("全角半角混在 %d バイトの入力が欠けます (保存 %s 文字)"
                 % (len(text.encode("utf-8")), len(saved) if saved else 0))
 
+    # ---- 6c-11. Windows のクリップボード貼り付け ----
+    if "ReadConsoleW" in tls_src:
+        ok("Windows では ReadConsoleW で読みます(行編集が効く)")
+    else:
+        bad("ReadConsoleW が使われていません")
+    if "ENABLE_LINE_INPUT" in tls_src and "SetConsoleMode" in tls_src:
+        ok("コンソールの行編集モードを有効にします")
+    else:
+        bad("行編集モードが有効化されていません")
+    if "CF_UNICODETEXT" in tls_src and "GetClipboardData" in tls_src:
+        ok("クリップボードを直接読む手段があります")
+    else:
+        bad("クリップボード読み取りがありません")
+    if "u0016" in tls_src:
+        ok("Ctrl-V が SYN(0x16) で届いても貼り付けます")
+    else:
+        bad("SYN として届く Ctrl-V が扱われていません")
+    # Windows の対話コンソールでは Console.In を差し替えないこと
+    if "interactiveConsole && IsWindows()" in tls_src:
+        ok("Windows の対話時は Console.In を差し替えません")
+    else:
+        bad("Console.In の差し替えが Ctrl-V を壊します")
+
     # ---- 6c-10. Ctrl-C でプロセスを終了しない ----
     if "CancelKeyPress" in tls_src:
         ok("Ctrl-C のシグナルを処理します")
