@@ -3072,6 +3072,41 @@ namespace Tau
         }
 
         // 1 ターン実行する
+        // ストリーミング中の進行状況。同じ行を上書きする。
+        static readonly string[] SPINNER = { "|", "/", "-", "\\" };
+        int progressTick = 0;
+        int progressLen = 0;
+
+        void ShowProgress(int chars)
+        {
+            progressTick++;
+            string spin = SPINNER[progressTick % SPINNER.Length];
+            string msg = (chars <= 0)
+                ? "  " + spin + " connecting..."
+                : "  " + spin + " receiving... " + chars + " chars";
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append('\r').Append(msg);
+                int pad = progressLen - msg.Length;
+                if (pad > 0) sb.Append(new string(' ', pad));
+                Console.Write(sb.ToString());
+                progressLen = msg.Length;
+            }
+            catch { }
+        }
+
+        void ClearProgress()
+        {
+            if (progressLen <= 0) return;
+            try
+            {
+                Console.Write("\r" + new string(' ', progressLen) + "\r");
+            }
+            catch { }
+            progressLen = 0;
+        }
+
         void Turn(string userMessage)
         {
             cancelled = false;
@@ -3083,8 +3118,13 @@ namespace Tau
             const int KIND_NONE = 0, KIND_THINK = 1, KIND_CONTENT = 2;
             int kind = KIND_NONE;
             StringBuilder contentBuf = new StringBuilder();   // 本文(Markdown)
+            progressLen = 0;
+            progressTick = 0;
 
             Console.WriteLine();
+            if (LlmClient.DebugOn)
+                ConsoleUi.Dim("  sending " + userMessage.Length + " chars...\n");
+            ShowProgress(0);
             try
             {
                 string reply = agent.RunStream(ctx, userMessage,
@@ -3098,8 +3138,10 @@ namespace Tau
                             kind = KIND_CONTENT;
                         }
                         contentBuf.Append(d);
-                        // 進行中であることが分かるよう、行数を表示する
-                        if (LlmClient.DebugOn) Console.Write(d);
+                        // Markdown として整形するため本文はバッファするが、
+                        // 何も表示されないと「応答が無い」ように見えるので、
+                        // 受信した文字数を進行状況として表示する。
+                        ShowProgress(contentBuf.Length);
                     },
                     delegate (string d)
                     {
@@ -3114,12 +3156,15 @@ namespace Tau
                     },
                     delegate (string name, string detail)
                     {
+                        ClearProgress();
                         // ツール実行は必ず単独の行にする
                         if (kind != KIND_NONE) Console.WriteLine();
                         ConsoleUi.Tool(name, detail);
                         kind = KIND_NONE;   // ツール行は改行済みなので次はそのまま始められる
                     },
                     delegate () { return cancelled; });
+
+                ClearProgress();
 
                 // 本文を Markdown として整形して表示する
                 string body = (contentBuf.Length > 0)
@@ -3138,6 +3183,7 @@ namespace Tau
             }
             catch (Exception ex)
             {
+                ClearProgress();
                 Console.WriteLine();
                 string msg;
                 WebException wex = ex as WebException;
@@ -4225,7 +4271,8 @@ namespace Tau
             {
                 int width = 0;
                 try { width = Console.WindowWidth; } catch { }
-                if (width <= 0) width = 80;
+                // 取得できない・異常な値(0 や極端に大きい)のときは既定値にする
+                if (width <= 0 || width > 10000) width = 80;
 
                 int avail = Math.Max(1, width - 1 - promptWidth);
 

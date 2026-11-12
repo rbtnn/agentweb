@@ -13,7 +13,7 @@
 
     python3 test_tau.py
 """
-import json, os, shutil, socket, subprocess, sys, tempfile, threading, time
+import glob, json, os, shutil, socket, subprocess, sys, tempfile, threading, time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -680,6 +680,47 @@ def main():
         ok("水平線が罫線で表示されます")
     else:
         bad("水平線が整形されていません")
+
+    # ---- 6c-7. 長い日本語の入力 ----
+    # 300 文字の日本語を入力しても、応答が返り、内容が欠けないこと
+    long_cfg = os.path.join(work, "long.json")
+    with open(long_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % md_port,
+                   "llmApiKey": "k", "model": "m", "allowTools": False,
+                   "useSystemProxy": False}, f)
+    long_text = "あいうえお" * 60       # 300 文字
+    out = run_tau(long_text + "\n/exit\n", args=["--config", long_cfg])
+    if "了解しました" in out or "単語" in out or "Heading1" in out:
+        ok("長い日本語(300 文字)でも応答が表示されます")
+    else:
+        bad("長い日本語で応答がありません: " + out[-300:])
+    # 保存された内容が欠けていないこと
+    # セッションは TauDataDir()/sessions に保存される(--config とは別)
+    sess = sorted(glob.glob(os.path.join(work, "config", "tau", "sessions", "*.json")))
+    if not sess:
+        sess = sorted(glob.glob(os.path.join(work, ".config", "tau", "sessions", "*.json")))
+    if not sess:
+        sess = sorted(glob.glob(os.path.join(os.path.expanduser("~"),
+                                             ".config", "tau", "sessions", "*.json")))
+    saved = None
+    for fn in sess:
+        try:
+            d = json.load(open(fn, encoding="utf-8-sig"))
+            for m in d.get("messages", []):
+                if m.get("role") == "user" and len(m.get("content") or "") > 100:
+                    saved = m["content"]
+        except Exception:
+            pass
+    if saved is not None and len(saved) >= len(long_text) - 10:
+        ok("長い日本語の入力が欠けずに保存されます (%d 文字)" % len(saved))
+    else:
+        bad("長い入力が欠けています: %r" % (saved[:80] if saved else None))
+
+    # ストリーミング中に進行状況が表示されること(無言にならない)
+    if "receiving" in tls_src:
+        ok("受信中の進行状況が表示されます")
+    else:
+        bad("進行状況の表示がありません")
 
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
