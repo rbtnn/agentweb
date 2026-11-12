@@ -131,10 +131,11 @@ namespace Tau
         //   - shift-jis … Windows のコンソール既定。日本語入力が安定する
         //   - utf-8     … コンソールが UTF-8 のとき
         //   - default   … 触らない
-        // Console.ReadLine() は .NET Framework で既定 256 バイトの入力バッファを使う。
-        // この 256 には CR/LF も含まれるため 254 文字までしか読めず、
-        // 全角と半角が混在すると文字数ではなくバイト数で上限に達するため、
-        // 255 バイト前後の日本語が途中で切れて送信される。
+        // Console.ReadLine() は .NET Framework で既定 256 単位の入力バッファを使う。
+        // この上限はバイト数ではなく「文字数」で判定され、256 には CR/LF も
+        // 含まれるため 254 文字までしか読めず、それ以降は黙って切り捨てられる。
+        // 全角・半角を問わず 254 文字で切れるため、日本語の長いプロンプトが
+        // 途中で切れて送信される。
         //
         // Console.In を大きなバッファの StreamReader に差し替えると、
         // 既存の Console.ReadLine() 呼び出しすべてがその恩恵を受ける。
@@ -201,6 +202,31 @@ namespace Tau
             {
                 // 設定できない場合は何もしない(コンソール既定のまま)
             }
+
+            // Windows では Console.InputEncoding を変えても、コンソールの
+            // 実際のコードページ(GetConsoleCP)は変わらないことがある。
+            // その状態で Console.ReadKey() を使うと日本語が壊れる
+            // (例: 「あ」→ U+7E3A)。両者を一致させておく。
+            try { SetConsoleCPIfPossible(enc.CodePage); } catch { }
+        }
+
+        // コンソールの実際のコードページを、指定した値に合わせる。
+        // Windows 以外や失敗時は何もしない。
+        static void SetConsoleCPIfPossible(int codePage)
+        {
+            if (codePage <= 0) return;
+            try
+            {
+                int p = (int)Environment.OSVersion.Platform;
+                if (p != 2 && p != 1) return;   // Windows 以外
+
+                int current = LineEditor.ConsoleInputCodePagePublic();
+                if (current == codePage) return;   // 既に一致している
+
+                if (LineEditor.SetConsoleCP((uint)codePage))
+                    LineEditor.MarkConsoleCodePage(codePage);
+            }
+            catch { }
         }
 
         // 文字列中の NUL 文字の個数を数える
@@ -3877,25 +3903,47 @@ namespace Tau
         // Shift-JIS のときは従来どおり Console.ReadLine() に任せる。
         static bool enabled = false;
 
-        // 自前の行編集はいったん無効にしている。
+        // 自前の行編集を有効にするか判定する。
         //
         // Console.ReadKey() は Console.InputEncoding に従ってバイトを文字に
-        // 変換するため、コンソールの実際のコードページと合っていないと
-        // 日本語が壊れる(例: 「あ」→ U+7E3A)。さらに長い日本語を入力すると
-        // 途中で切れて送信されることがある。安定して動く Console.ReadLine()
-        // に任せるため、すべての入力経路でこちらを使う。
+        // 変換する。コンソールの実際のコードページ(GetConsoleCP)と
+        // Console.InputEncoding が食い違っていると日本語が壊れる
+        // (例: 「あ」→ U+7E3A)。起動時に SetConsoleCP で両者を一致させて
+        // いるので、ここでは「一致しているか」だけを確認する。
+        // 自前の行編集は使わない。
         //
-        // 復活させる場合は Configure で enabled = true にする
-        // (切り替え用のフラグも戻す)。
+        // Console.ReadKey() は Console.InputEncoding に従ってバイトを文字に
+        // 変換する。コンソールの実際のコードページ(GetConsoleCP)と食い違うと
+        // 日本語が壊れ(「あ」→ U+7E3A)、長い入力が途中で切れることもある。
+        // 安定して動く Console.ReadLine() に任せる。
+        //
+        // 起動時に SetConsoleCP でコードページを一致させているので、将来
+        // 復活させる場合はここで enabled = true にすればよい。ただし
+        // 実機で長い日本語・IME の確認をしてから有効にすること。
         public static void Configure(Config cfg)
         {
             enabled = false;
         }
 
+        internal static int ConsoleInputCodePagePublic()
+        {
+            return ConsoleInputCodePage();
+        }
+
+        internal static void MarkConsoleCodePage(int cp)
+        {
+            // SetConsoleCP で変更したので、以降は一致しているとみなす。
+            // (ConsoleInputCodePage は実際の値を返すので特に何もしない)
+        }
+
         // Windows の実際のコンソール入力コードページ(GetConsoleCP)。
         // Windows 以外や取得できない場合は 0。
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        static extern uint GetConsoleCP();
+        internal static extern uint GetConsoleCP();
+
+        // コンソールのコードページを変更する(SetConsoleCP)。
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern bool SetConsoleCP(uint wCodePageID);
 
         static int ConsoleInputCodePage()
         {

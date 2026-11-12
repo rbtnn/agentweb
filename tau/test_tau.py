@@ -1064,6 +1064,11 @@ def main():
         ok("行編集の切り替えオプションは削除されています")
     else:
         bad("行編集の切り替えオプションが残っています")
+    # 将来の復活に備えてコードページの一致処理は残す
+    if "SetConsoleCP" in tls_src:
+        ok("コンソールのコードページを一致させます(将来の復活に備える)")
+    else:
+        bad("コードページの一致処理がありません")
     if "Console.ReadLine()" in tls_src:
         ok("入力は Console.ReadLine() で読み取ります")
     else:
