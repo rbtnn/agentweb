@@ -812,6 +812,71 @@ def main():
             bad("全角半角混在 %d バイトの入力が欠けます (保存 %s 文字)"
                 % (len(text.encode("utf-8")), len(saved) if saved else 0))
 
+    # ---- 6c-10. Ctrl-C でプロセスを終了しない ----
+    if "CancelKeyPress" in tls_src:
+        ok("Ctrl-C のシグナルを処理します")
+    else:
+        bad("Ctrl-C の処理がありません")
+    if "e.Cancel = true" in tls_src:
+        ok("Ctrl-C でプロセスを終了しません")
+    else:
+        bad("Ctrl-C でプロセスが終了します")
+    if "LlmClient.Cancel()" in tls_src:
+        ok("Ctrl-C で通信中のリクエストを中断します")
+    else:
+        bad("通信中のリクエストが中断されません")
+    if "waitingForInput" in tls_src:
+        ok("入力待ちかどうかを区別します")
+    else:
+        bad("入力待ちの判定がありません")
+    if "(cancelled input)" in tls_src:
+        ok("入力待ちの Ctrl-C でプロンプトに戻ります")
+    else:
+        bad("入力待ちの Ctrl-C が扱われていません")
+    if "(cancelled)" in tls_src:
+        ok("ターンの Ctrl-C で中止を表示します")
+    else:
+        bad("ターン中止の表示がありません")
+
+    # 実際に SIGINT(Ctrl-C 相当) でプロセスが落ちないことを確認する。
+    # Mono は stdin がパイプだと CancelKeyPress が動かないため、pty を使う。
+    import pty as _pty
+    import signal as _signal
+    import select as _select
+    _master, _slave = _pty.openpty()
+    p = subprocess.Popen(["mono", exe], stdin=_slave, stdout=_slave,
+                         stderr=_slave, env=env, cwd=os.path.dirname(exe))
+    os.close(_slave)
+    time.sleep(3.0)
+    _alive0 = p.poll() is None
+    p.send_signal(_signal.SIGINT)
+    time.sleep(1.5)
+    _alive = p.poll() is None
+    # 2 回目の入力ができること(プロンプトに戻っている)
+    os.write(_master, b"/exit\r")
+    time.sleep(1.5)
+    try:
+        while True:
+            r, _, _ = _select.select([_master], [], [], 0.2)
+            if not r:
+                break
+            os.read(_master, 65536)
+    except OSError:
+        pass
+    p.terminate()
+    try:
+        p.wait(timeout=5)
+    except Exception:
+        p.kill()
+    try:
+        os.close(_master)
+    except OSError:
+        pass
+    if _alive0 and _alive:
+        ok("SIGINT(Ctrl-C) でプロセスが終了しません")
+    else:
+        bad("SIGINT でプロセスが終了します")
+
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
     multi_port = multi_srv.server_address[1]

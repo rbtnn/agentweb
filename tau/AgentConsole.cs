@@ -264,7 +264,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-16 wide-input";
+        public const string BuildStamp = "2026-02-17 ctrl-c-cancel";
 
         internal static void PrintVersion()
         {
@@ -2705,7 +2705,9 @@ namespace Tau
         readonly Agent agent;
 
         SessionCtx ctx;
-        bool cancelled;
+        bool cancelled;          // 現在のターンを中止するか
+        bool ctrlCPressed;       // Ctrl-C が押されたか
+        bool waitingForInput;    // 入力待ちの最中か
 
         public Chat(Config cfg)
         {
@@ -2777,16 +2779,38 @@ namespace Tau
 
             if (resumed) PrintHistory(ctx);
 
+            // Ctrl-C はプロセスを終了させず、現在のターンだけ中止する。
+            // e.Cancel = true で既定の終了動作を抑止する。
+            Console.CancelKeyPress += delegate (object sender, ConsoleCancelEventArgs e)
+            {
+                e.Cancel = true;          // プロセスを終了しない
+                ctrlCPressed = true;
+                cancelled = true;         // 実行中のターンを中止する
+                LlmClient.Cancel();       // 通信中なら HTTP リクエストを中断する
+
+                // 入力待ちの途中なら、すぐ改行してプロンプトを出し直す
+                if (waitingForInput)
+                {
+                    try { Console.Write("\n"); } catch { }
+                }
+            };
+
             int nulLost = 0;   // 連続して入力が NUL で失われた回数
 
             while (true)
             {
                 string line;
+                ctrlCPressed = false;
                 if (LlmClient.DebugOn)
                     ConsoleUi.Dim("  [waiting for input]\n");
-                try { line = LineEditor.ReadLineColored("> ", "36"); }
+                waitingForInput = true;
+                try
+                {
+                    line = LineEditor.ReadLineColored("> ", "36");
+                }
                 catch (Exception ex)
                 {
+                    waitingForInput = false;
                     // 入力の読み取りで例外が出たら、黙って終了せず原因を出す
                     ConsoleUi.Danger("\n⚠ Failed to read input: " + ex.GetType().Name
                         + ": " + ex.Message + "\n");
@@ -2794,11 +2818,21 @@ namespace Tau
                         ConsoleUi.Dim("  " + ex.ToString().Replace("\n", "\n  ") + "\n");
                     break;
                 }
+                waitingForInput = false;
 
                 if (LlmClient.DebugOn)
                     ConsoleUi.Dim("  [input] length=" + (line == null ? -1 : line.Length)
                         + " bytes=" + (line == null ? -1 : Encoding.UTF8.GetByteCount(line))
                         + (line == null ? " (null)" : "") + "\n");
+
+                if (ctrlCPressed)
+                {
+                    // 入力待ちの途中で Ctrl-C: 入力行を捨ててプロンプトに戻る
+                    ctrlCPressed = false;
+                    cancelled = false;
+                    ConsoleUi.Dim("  (cancelled input)\n");
+                    continue;
+                }
 
                 if (line == null) break;   // Ctrl-G / Ctrl-D / EOF
 
@@ -3265,6 +3299,17 @@ namespace Tau
 
                 ClearProgress();
 
+                if (cancelled)
+                {
+                    // Ctrl-C で中止した。途中までの本文は出さず、その旨を伝える。
+                    if (kind != KIND_NONE) Console.WriteLine();
+                    ConsoleUi.Dim("  (cancelled)\n");
+                    Console.WriteLine();
+                    cancelled = false;
+                    ctrlCPressed = false;
+                    return;
+                }
+
                 // 本文を Markdown として整形して表示する
                 string body = (contentBuf.Length > 0)
                     ? contentBuf.ToString()
@@ -3284,6 +3329,17 @@ namespace Tau
             {
                 ClearProgress();
                 Console.WriteLine();
+
+                if (cancelled)
+                {
+                    // Ctrl-C による中止はエラーとして扱わない
+                    ConsoleUi.Dim("  (cancelled)\n");
+                    Console.WriteLine();
+                    cancelled = false;
+                    ctrlCPressed = false;
+                    return;
+                }
+
                 string msg;
                 WebException wex = ex as WebException;
                 if (wex != null) msg = LlmClient.DescribeWebException(wex);
