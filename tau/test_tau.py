@@ -1260,6 +1260,21 @@ def main():
     else:
         bad("起動時に TLS が適用されません")
 
+    # ---- 6l. 全角幅の判定(East Asian Width) ----
+    if "AmbiguousRanges" in tls_src:
+        ok("Ambiguous 幅の文字を全角として扱います(①②③ など)")
+    else:
+        bad("Ambiguous 幅の判定がありません")
+    if "IsAmbiguous" in tls_src:
+        ok("Ambiguous の判定を二分探索で行います")
+    else:
+        bad("Ambiguous の判定関数がありません")
+    out = run_tau("", args=["--test"])
+    if "ambiguous-width chars count as 2 columns" in out:
+        ok("--test で Ambiguous 幅を確認します")
+    else:
+        bad("--test に Ambiguous 幅の確認がありません")
+
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
     # TLS 1.2 以上を要求する API で

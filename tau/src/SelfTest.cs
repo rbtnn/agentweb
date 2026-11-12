@@ -396,6 +396,37 @@ namespace Tau
             Check(MarkdownRenderer.VisibleLength("あA") == 3,
                 "mixed width adds up", null);
 
+            // East Asian Width = Ambiguous の文字は日本語端末で 2 桁
+            string[] wideAmbiguous = new string[]
+            {
+                "①", "②", "③", "⑩", "℡", "№", "Ⅰ", "ⅰ",
+                "←", "→", "■", "□", "●", "○", "★", "☆",
+                "※", "⇔", "⇒", "〒", "㈱", "㍿", "㌔", "㍉", "㊤",
+            };
+            int badAmbiguous = 0;
+            string firstBad = null;
+            for (int i = 0; i < wideAmbiguous.Length; i++)
+            {
+                string ch = wideAmbiguous[i];
+                int w = MarkdownRenderer.VisibleLength(ch);
+                if (w != 2)
+                {
+                    badAmbiguous++;
+                    if (firstBad == null)
+                        firstBad = ch + " (U+" + ((int)ch[0]).ToString("X4")
+                            + ") width=" + w;
+                }
+            }
+            Check(badAmbiguous == 0,
+                "ambiguous-width chars count as 2 columns (①②③ ←→ ■□ ★☆ etc.)",
+                badAmbiguous > 0 ? badAmbiguous + " wrong, first: " + firstBad : null);
+
+            // 半角カナ・半角英数は 1 桁のまま
+            Check(MarkdownRenderer.VisibleLength("ｱ") == 1,
+                "half-width katakana counts as 1 column", null);
+            Check(MarkdownRenderer.VisibleLength("-") == 1,
+                "ASCII punctuation counts as 1 column", null);
+
             // ANSI を除いた長さ
             string colored = MarkdownRenderer.Inline("**bold**");
             int vis = MarkdownRenderer.VisibleLength(colored);
