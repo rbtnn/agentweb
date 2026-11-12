@@ -1244,6 +1244,22 @@ def main():
     else:
         bad("旧 AgentConsole.cs が残っています")
 
+    # ---- 6k. クリップボードと TLS の修正 ----
+    # CloseClipboard は OpenClipboard が成功したときだけ呼ぶこと
+    if "bool opened = false;" in tls_src and "if (opened)" in tls_src:
+        ok("クリップボードは開いたときだけ閉じます(ハンドル整合)")
+    else:
+        bad("クリップボードの開閉が不整合です")
+    if "SetClipboardText" in tls_src and "EmptyClipboard" in tls_src:
+        ok("クリップボードへの書き込みもできます(往復テスト用)")
+    else:
+        bad("クリップボード書き込みがありません")
+    # TLS 1.2 を起動時に適用すること
+    if "LlmClient.ApplyTls();" in tls_src:
+        ok("起動時に TLS 1.2 を適用します")
+    else:
+        bad("起動時に TLS が適用されません")
+
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
     # TLS 1.2 以上を要求する API で

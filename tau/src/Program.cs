@@ -76,6 +76,11 @@ namespace Tau
             // Markdown の色付けを、コンソールの色対応に合わせる
             MarkdownRenderer.Configure(ConsoleUi.ColorEnabled);
 
+            // TLS 1.2 を最初に適用しておく。
+            // .NET Framework の既定は Ssl3 | Tls のままで、現代のサーバでは
+            // ほぼ必ず拒否される。要求のたびに設定するより先に固定しておく。
+            LlmClient.ApplyTls();
+
             if (diag) { Diagnostics.Run(cfg); return; }
 
             if (selfTest)
@@ -289,7 +294,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-19 split+selftest";
+        public const string BuildStamp = "2026-02-20 clipboard-tls";
 
         internal static void PrintVersion()
         {

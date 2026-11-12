@@ -363,6 +363,23 @@ namespace Tau
                 if (preview.Length > 40) preview = preview.Substring(0, 40) + "...";
                 ConsoleUi.Dim("       preview: " + preview + "\n");
             }
+
+            // クリップボードの往復(書き込み → 読み出し)で実装を検証する。
+            // 元の内容は後で戻す。
+            string marker = "tau-clipboard-test-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            bool wrote = LineEditor.SetClipboardText(marker);
+            if (!wrote)
+            {
+                Skip("could not write to the clipboard for a round-trip test");
+                return;
+            }
+
+            string back = LineEditor.GetClipboardText();
+            Check(back == marker, "clipboard round-trip returns the same text",
+                back == marker ? null : ("got " + (back == null ? "null" : back.Length + " chars")));
+
+            // 元に戻す
+            if (clip != null && clip.Length > 0) LineEditor.SetClipboardText(clip);
         }
 
         // ---------------- 6. Markdown ----------------
@@ -577,9 +594,23 @@ namespace Tau
             Section("10. TLS");
 
             string tls = LlmClient.CurrentTls;
-            Check(tls != null && tls.Length > 0, "a TLS setting is chosen (" + tls + ")", null);
+            Console.WriteLine("    current: " + tls);
 
-            // Tls12 単独で設定できること
+            // 起動時に ApplyTls() が呼ばれ、Tls12 単独になっていること。
+            // Ssl3 や Tls(1.0) のままだと、現代のサーバでは接続が拒否される。
+            bool isTls12 = false;
+            try
+            {
+                isTls12 = (System.Net.ServicePointManager.SecurityProtocol
+                           == System.Net.SecurityProtocolType.Tls12);
+            }
+            catch { }
+
+            Check(isTls12, "TLS 1.2 is applied at startup (not Ssl3/Tls)",
+                isTls12 ? null
+                        : ("currently " + tls + " - Ssl3/Tls will be rejected by most servers"));
+
+            // TLS 1.2 を明示的に設定できること
             bool ok = true;
             string why = null;
             try
@@ -594,7 +625,7 @@ namespace Tau
                 ok = false;
                 why = ex.GetType().Name + ": " + ex.Message;
             }
-            Check(ok, "TLS 1.2 can be selected", why);
+            Check(ok, "TLS 1.2 can be selected explicitly", why);
 
             // エンドポイントの表示
             ConsoleUi.Dim("       endpoint: " + cfg.ApiBaseUrl + "\n");

@@ -217,6 +217,62 @@ namespace Tau
             catch { return null; }
         }
 
+        // クリップボードにテキストを書き込む(テストと将来の拡張用)。
+        // 成功なら true。
+        public static bool SetClipboardText(string text)
+        {
+            if (!Program.IsWindows()) return false;
+            if (text == null) return false;
+
+            bool opened = false;
+            try
+            {
+                if (!OpenClipboard(IntPtr.Zero)) return false;
+                opened = true;
+
+                if (!EmptyClipboard()) return false;
+
+                // UTF-16 の文字列を NUL 終端付きでコピーする
+                int chars = text.Length + 1;
+                IntPtr h = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)(chars * 2));
+                if (h == IntPtr.Zero) return false;
+
+                IntPtr ptr = GlobalLock(h);
+                if (ptr == IntPtr.Zero)
+                {
+                    GlobalFree(h);
+                    return false;
+                }
+
+                try
+                {
+                    System.Runtime.InteropServices.Marshal.Copy(text.ToCharArray(), 0, ptr, text.Length);
+                    // 終端の NUL
+                    System.Runtime.InteropServices.Marshal.WriteInt16(ptr, text.Length * 2, 0);
+                }
+                finally
+                {
+                    GlobalUnlock(h);
+                }
+
+                // SetClipboardData が成功したら所有権はシステムに移る
+                if (SetClipboardData(CF_UNICODETEXT, h) == IntPtr.Zero)
+                {
+                    GlobalFree(h);
+                    return false;
+                }
+                return true;
+            }
+            catch { return false; }
+            finally
+            {
+                if (opened)
+                {
+                    try { CloseClipboard(); } catch { }
+                }
+            }
+        }
+
         // ------------------------------------------------------------------
         //  クリップボードからの貼り付け
         //
@@ -239,33 +295,57 @@ namespace Tau
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         static extern bool GlobalUnlock(IntPtr hMem);
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalFree(IntPtr hMem);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        static extern bool EmptyClipboard();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
         const uint CF_UNICODETEXT = 13;
+        const uint GMEM_MOVEABLE = 0x0002;
 
         // クリップボードのテキストを取得する。取得できなければ null。
         public static string GetClipboardText()
         {
             if (!Program.IsWindows()) return null;
+
+            bool opened = false;
             try
             {
                 if (!OpenClipboard(IntPtr.Zero)) return null;
+                opened = true;
+
                 IntPtr handle = GetClipboardData(CF_UNICODETEXT);
-                if (handle == IntPtr.Zero) return null;
+                if (handle == IntPtr.Zero) return null;   // テキスト以外が入っている
 
                 IntPtr ptr = GlobalLock(handle);
                 if (ptr == IntPtr.Zero) return null;
+
+                string text = null;
                 try
                 {
-                    return System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr);
+                    text = System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr);
                 }
                 finally
                 {
-                    GlobalUnlock(handle);
+                    GlobalUnlock(handle);   // ロックは必ず解除する
                 }
+                return text;
             }
             catch { return null; }
             finally
             {
-                try { CloseClipboard(); } catch { }
+                // OpenClipboard が成功したときだけ閉じる
+                if (opened)
+                {
+                    try { CloseClipboard(); } catch { }
+                }
             }
         }
 
