@@ -1270,10 +1270,19 @@ def main():
     else:
         bad("Ambiguous の判定関数がありません")
     out = run_tau("", args=["--test"])
-    if "ambiguous-width chars count as 2 columns" in out:
-        ok("--test で Ambiguous 幅を確認します")
+    if "ambiguous-width chars use the measured width" in out:
+        ok("--test で Ambiguous 幅を実測値と比較します")
     else:
         bad("--test に Ambiguous 幅の確認がありません")
+    # 1 桁端末と 2 桁端末の両方で通ること
+    for forced in ("1", "2"):
+        o = run_tau("", args=["--test"],
+                    extra_env={"TAU_AMBIGUOUS_WIDTH": forced})
+        if "ambiguous-width chars use the measured width (" + forced in o \
+           and "FAILED" not in o:
+            ok("--test は %s 桁端末でも通ります" % forced)
+        else:
+            bad("--test が %s 桁端末で失敗します" % forced)
 
     # ---- 6m. 端末の実幅を測る ----
     if "MeasureWidthsOnce" in tls_src:

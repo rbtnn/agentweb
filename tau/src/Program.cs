@@ -355,7 +355,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-23 measure-ambiguous";
+        public const string BuildStamp = "2026-02-24 ambiguous-verify";
 
         internal static void PrintVersion()
         {

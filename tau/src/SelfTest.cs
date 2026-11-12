@@ -397,64 +397,50 @@ namespace Tau
                 "mixed width adds up", null);
 
             // East Asian Width = Ambiguous の文字は日本語端末で 2 桁
+            // Ambiguous(A) の文字だけを並べる。
+            // 〒 や ㍿ などは W(全角) なので、端末に関係なく常に 2 桁。
             string[] wideAmbiguous = new string[]
             {
                 "①", "②", "③", "⑩", "℡", "№", "Ⅰ", "ⅰ",
                 "←", "→", "■", "□", "●", "○", "★", "☆",
-                "※", "⇔", "⇒", "〒", "㈱", "㍿", "㌔", "㍉", "㊤",
+                "※", "⇔", "⇒",
             };
+            // まず実測する。Ambiguous は端末のフォント次第で 1 桁にも 2 桁にも
+            // なるため、実測値を基準に判定する。
+            MarkdownRenderer.MeasureWidthsOnce();
+            int expectedAmb = MarkdownRenderer.MeasuredAmbiguousWidth();
+            string ambText = (expectedAmb == 1) ? "1 column (half-width)"
+                           : (expectedAmb == 2) ? "2 columns (full-width)"
+                           : "unknown (using 2 columns)";
+            ConsoleUi.Dim("       terminal renders ambiguous-width as: " + ambText + "\n");
+            if (expectedAmb != 0)
+                Pass("ambiguous width was measured on this terminal ("
+                    + expectedAmb + " columns)");
+            else
+            {
+                Skip("cannot measure here (redirected or no console); "
+                    + "using 2 columns - set TAU_AMBIGUOUS_WIDTH=1 or 2 to force");
+                expectedAmb = 2;
+            }
+
             int badAmbiguous = 0;
             string firstBad = null;
             for (int i = 0; i < wideAmbiguous.Length; i++)
             {
                 string ch = wideAmbiguous[i];
                 int w = MarkdownRenderer.VisibleLength(ch);
-                if (w != 2)
+                if (w != expectedAmb)
                 {
                     badAmbiguous++;
                     if (firstBad == null)
                         firstBad = ch + " (U+" + ((int)ch[0]).ToString("X4")
-                            + ") width=" + w;
+                            + ") width=" + w + " but terminal uses " + expectedAmb;
                 }
             }
             Check(badAmbiguous == 0,
-                "ambiguous-width chars count as 2 columns (①②③ ←→ ■□ ★☆ etc.)",
+                "ambiguous-width chars use the measured width (" + expectedAmb
+                + " columns: ①②③ ←→ ■□ ★☆ etc.)",
                 badAmbiguous > 0 ? badAmbiguous + " wrong, first: " + firstBad : null);
-
-            // 実際の端末が何桁で描くかを測って報告する。
-            // 計算上 2 桁でも 1 桁で描く端末があり、その場合は計算に合わせると
-            // 罫線がずれる。
-            MarkdownRenderer.MeasureWidthsOnce();
-            int measuredAmb = MarkdownRenderer.MeasuredAmbiguousWidth();
-            string ambText = (measuredAmb == 1) ? "1 column (half-width)"
-                           : (measuredAmb == 2) ? "2 columns (full-width)"
-                           : "unknown (using 2 columns)";
-            ConsoleUi.Dim("       terminal renders ambiguous-width as: " + ambText + "\n");
-            if (measuredAmb != 0)
-                Pass("ambiguous width was measured on this terminal ("
-                    + measuredAmb + " columns)");
-            else
-                Skip("cannot measure here (redirected or no console); "
-                    + "using 2 columns - set TAU_AMBIGUOUS_WIDTH=1 or 2 to force");
-
-            // 個別の文字が実測値と一致しているか
-            string[] probe = new string[] { "①", "③", "⑩", "←", "★", "※", "℡", "Ⅰ" };
-            int mismatched = 0;
-            string firstMismatch = null;
-            for (int i = 0; i < probe.Length; i++)
-            {
-                int w = MarkdownRenderer.VisibleLength(probe[i]);
-                if (measuredAmb != 0 && w != measuredAmb)
-                {
-                    mismatched++;
-                    if (firstMismatch == null)
-                        firstMismatch = probe[i] + " width=" + w
-                            + " but terminal uses " + measuredAmb;
-                }
-            }
-            Check(mismatched == 0,
-                "ambiguous characters match the measured width",
-                mismatched > 0 ? firstMismatch : null);
 
             // 実際の描画で罫線が揃うかを確認する(見本)。
             // 余白は計算幅から求めるので、計算と実表示が食い違えば崩れる。
