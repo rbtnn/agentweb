@@ -41,6 +41,7 @@ namespace Tau
             string sessionArg = "";
             bool help = false;
             bool diag = false;
+            bool version = false;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -53,10 +54,12 @@ namespace Tau
                 else if (a == "--list") { ListSessions(configPath); return; }
                 else if (a == "--debug") LlmClient.EnableDebug();
                 else if (a == "--diag") diag = true;
+                else if (a == "--version" || a == "-v") version = true;
                 else if (a == "--line-editor") LineEditor.SetForced(true);
                 else if (a == "--no-line-editor") LineEditor.SetForced(false);
             }
 
+            if (version) { PrintVersion(); return; }
             if (help) { PrintHelp(); return; }
 
             Config cfg = new Config(configPath);
@@ -197,6 +200,23 @@ namespace Tau
             return sb.ToString();
         }
 
+        // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
+        public const string BuildStamp = "2026-02-14 progress+input";
+
+        internal static void PrintVersion()
+        {
+            Console.WriteLine("tau " + BuildStamp);
+            string loc = "";
+            try { loc = System.Reflection.Assembly.GetExecutingAssembly().Location; } catch { }
+            Console.WriteLine("  exe   : " + loc);
+            try
+            {
+                Console.WriteLine("  built : "
+                    + File.GetLastWriteTimeUtc(loc).ToString("yyyy-MM-dd HH:mm:ss") + " UTC");
+            }
+            catch { }
+        }
+
         internal static void PrintHelp()
         {
             Console.WriteLine("tau - AI agent that runs in the console");
@@ -204,6 +224,7 @@ namespace Tau
             Console.WriteLine("Usage: tau.exe [options]");
             Console.WriteLine("  --config <path>    Path to the config file (tau.json)");
             Console.WriteLine("  --session <id>     Open an existing session and continue it");
+            Console.WriteLine("  --version          Show the build stamp and exit");
             Console.WriteLine("  --list             List saved sessions and exit");
             Console.WriteLine("  --diag             Run a connection diagnostic (TLS/HTTP) and exit");
             Console.WriteLine("  --debug            Enable debug output (same as TAU_DEBUG=1)");
@@ -2700,8 +2721,22 @@ namespace Tau
             while (true)
             {
                 string line;
+                if (LlmClient.DebugOn)
+                    ConsoleUi.Dim("  [waiting for input]\n");
                 try { line = LineEditor.ReadLineColored("> ", "36"); }
-                catch { break; }
+                catch (Exception ex)
+                {
+                    // 入力の読み取りで例外が出たら、黙って終了せず原因を出す
+                    ConsoleUi.Danger("\n⚠ Failed to read input: " + ex.GetType().Name
+                        + ": " + ex.Message + "\n");
+                    if (LlmClient.DebugOn)
+                        ConsoleUi.Dim("  " + ex.ToString().Replace("\n", "\n  ") + "\n");
+                    break;
+                }
+
+                if (LlmClient.DebugOn)
+                    ConsoleUi.Dim("  [input] length=" + (line == null ? -1 : line.Length)
+                        + (line == null ? " (null)" : "") + "\n");
 
                 if (line == null) break;   // Ctrl-G / Ctrl-D / EOF
 
@@ -3081,9 +3116,11 @@ namespace Tau
         {
             progressTick++;
             string spin = SPINNER[progressTick % SPINNER.Length];
-            string msg = (chars <= 0)
-                ? "  " + spin + " connecting..."
-                : "  " + spin + " receiving... " + chars + " chars";
+            string msg;
+            if (chars <= 0)
+                msg = "  " + spin + " connecting...";
+            else
+                msg = "  " + spin + " receiving... " + chars + " chars";
             try
             {
                 StringBuilder sb = new StringBuilder();
@@ -3816,7 +3853,20 @@ namespace Tau
             }
             catch { return; }
 
-            // 入力が UTF-8 のときだけ有効にする
+            // Windows のコンソールでは ReadKey による自前の行編集を既定で使わない。
+            // Console.InputEncoding を UTF-8 にしても実際のコンソール コードページが
+            // 932 のままだと ReadKey が文字を壊し、IME 併用時は入力が返らないことがある。
+            // 安定している Console.ReadLine() に任せ、使いたい人だけ
+            // --line-editor で明示的に有効にする。
+            int cp = 0;
+            try { cp = ConsoleInputCodePage(); } catch { }
+            if (cp != 0)
+            {
+                enabled = false;   // Windows のコンソール
+                return;
+            }
+
+            // Windows 以外(Unix 系)は、入力が UTF-8 のときだけ有効にする
             try
             {
                 Encoding e = Console.InputEncoding;
@@ -3830,6 +3880,24 @@ namespace Tau
         {
             forced = true;
             enabled = on;
+        }
+
+        // Windows の実際のコンソール入力コードページ(GetConsoleCP)。
+        // Windows 以外や取得できない場合は 0。
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern uint GetConsoleCP();
+
+        static int ConsoleInputCodePage()
+        {
+            try
+            {
+                int p = (int)System.Environment.OSVersion.Platform;
+                // PlatformID.Win32NT = 2, Win32Windows = 1
+                if (p != 2 && p != 1) return 0;   // Windows 以外
+                uint cp = GetConsoleCP();
+                return (cp > 0) ? (int)cp : 0;
+            }
+            catch { return 0; }
         }
 
         static bool interactive()

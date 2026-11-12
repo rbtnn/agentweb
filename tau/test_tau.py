@@ -722,6 +722,32 @@ def main():
     else:
         bad("進行状況の表示がありません")
 
+    # ---- 6c-8. 入力段階の診断 ----
+    if "--version" in tls_src and "BuildStamp" in tls_src:
+        ok("--version でビルド識別子を確認できます")
+    else:
+        bad("--version がありません")
+    out = run_tau("", args=["--version"])
+    if "tau " in out and "exe" in out:
+        ok("--version がビルド情報を表示します")
+    else:
+        bad("--version の出力が不正: " + out[:200])
+    # 入力の読み取りで例外が出たら黙って終了しないこと
+    if "Failed to read input" in tls_src:
+        ok("入力の読み取り失敗が表示されます(無言で終了しない)")
+    else:
+        bad("入力の読み取り失敗が無言で握りつぶされます")
+    # 入力待ちが分かること(TAU_DEBUG)
+    if "waiting for input" in tls_src:
+        ok("TAU_DEBUG=1 で入力待ちが表示されます")
+    else:
+        bad("入力待ちの表示がありません")
+    # Windows では自前の行編集を既定で使わない(ReadKey が壊れるため)
+    if "GetConsoleCP" in tls_src:
+        ok("Windows の実際のコードページを確認します")
+    else:
+        bad("コンソール コードページの確認がありません")
+
     # ---- 6d-2. 出力の種類が変わったら改行される ----
     multi_srv = HTTPServer(("127.0.0.1", 0), MockMulti)
     multi_port = multi_srv.server_address[1]
