@@ -32,8 +32,8 @@ if not defined CSC (
     exit /b 1
 )
 
-echo コンパイル中: AgentConsole.cs
-"%CSC%" /nologo /target:exe /out:tau.exe /langversion:5 /optimize+ AgentConsole.cs
+echo コンパイル中: src\*.cs
+"%CSC%" /nologo /target:exe /out:tau.exe /langversion:5 /optimize+ src\*.cs
 if errorlevel 1 (
     echo.
     echo [ERROR] コンパイルに失敗しました。

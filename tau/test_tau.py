@@ -13,12 +13,13 @@
 
     python3 test_tau.py
 """
-import glob, json, os, shutil, socket, subprocess, sys, tempfile, threading, time
+import glob, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "AgentConsole.cs")
+SRCDIR = os.path.join(HERE, "src")
+SRC_FILES = sorted(glob.glob(os.path.join(SRCDIR, "*.cs")))
 
 fail = []
 def ok(msg): print("[ OK ] " + msg)
@@ -174,10 +175,11 @@ class MockTruncate(BaseHTTPRequestHandler):
 
 # --------------------------------------------------------------------------
 def main():
-    tls_src = open(SRC, encoding="utf-8").read()   # ソースの静的チェック用
+    # ソースの静的チェック用(クラスごとに分割されているので連結する)
+    tls_src = "".join(open(f, encoding="utf-8").read() for f in SRC_FILES)
     exe = os.path.join(tempfile.mkdtemp(prefix="tau_build_"), "tau.exe")
     print("=== tau 実行時回帰テスト ===")
-    rc = subprocess.run(["mcs", "-langversion:5", "-out:" + exe, SRC],
+    rc = subprocess.run(["mcs", "-langversion:5", "-out:" + exe] + SRC_FILES,
                         capture_output=True, text=True)
     if rc.returncode != 0:
         bad("tau.exe のビルドに失敗しました:\n" + rc.stdout + rc.stderr)
@@ -813,14 +815,15 @@ def main():
                 % (len(text.encode("utf-8")), len(saved) if saved else 0))
 
     # ---- 6c-11. Windows のクリップボード貼り付け ----
-    if "ReadConsoleW" in tls_src:
-        ok("Windows では ReadConsoleW で読みます(行編集が効く)")
+    # ENABLE_LINE_INPUT は ReadFile にも効くため、Console.ReadLine のまま
+    # 行編集(Ctrl-V 貼り付け)が働く。SetConsoleMode で有効化しておく。
+    if "ENABLE_LINE_INPUT" in tls_src or "EnableLineInput" in tls_src:
+        if "SetConsoleMode" in tls_src:
+            ok("コンソールの行編集モードを有効にします(Ctrl-V が効く)")
+        else:
+            bad("行編集モードが有効化されていません")
     else:
-        bad("ReadConsoleW が使われていません")
-    if "ENABLE_LINE_INPUT" in tls_src and "SetConsoleMode" in tls_src:
-        ok("コンソールの行編集モードを有効にします")
-    else:
-        bad("行編集モードが有効化されていません")
+        bad("行編集モードの指定がありません")
     if "CF_UNICODETEXT" in tls_src and "GetClipboardData" in tls_src:
         ok("クリップボードを直接読む手段があります")
     else:
@@ -829,11 +832,11 @@ def main():
         ok("Ctrl-V が SYN(0x16) で届いても貼り付けます")
     else:
         bad("SYN として届く Ctrl-V が扱われていません")
-    # Windows の対話コンソールでは Console.In を差し替えないこと
-    if "interactiveConsole && IsWindows()" in tls_src:
-        ok("Windows の対話時は Console.In を差し替えません")
+    # 入力は Console.ReadLine 経由で読むこと
+    if "Console.ReadLine()" in tls_src:
+        ok("入力は Console.ReadLine で読みます(行編集が効く)")
     else:
-        bad("Console.In の差し替えが Ctrl-V を壊します")
+        bad("Console.ReadLine が使われていません")
 
     # ---- 6c-10. Ctrl-C でプロセスを終了しない ----
     if "CancelKeyPress" in tls_src:
@@ -1170,6 +1173,76 @@ def main():
             bad("ReadKey 経路に到達する可能性があります")
     else:
         ok("ReadKey を使っていません")
+
+    # ---- 6i. tau --test (自己診断テスト) ----
+    if "static class SelfTest" in tls_src:
+        ok("自己診断テスト(SelfTest)が実装されています")
+    else:
+        bad("SelfTest がありません")
+    if 'a == "--test"' in tls_src:
+        ok("--test フラグが実装されています")
+    else:
+        bad("--test フラグがありません")
+    if "--test" in tls_src and "Run the built-in self test" in tls_src:
+        ok("--help に --test が表示されます")
+    else:
+        bad("--help に --test がありません")
+    # 実際に --test を実行する
+    out = run_tau("", args=["--test"])
+    if "tau --test  self test" in out:
+        ok("--test が自己診断を実行します")
+    else:
+        bad("--test の出力が不正: " + out[:300])
+    # 主要なセクションが含まれること
+    sections = ["environment", "input encoding round-trip",
+                "Markdown renderer", "Ctrl-C handling", "session store",
+                "config file", "TLS"]
+    missing = [x for x in sections if x not in out]
+    if not missing:
+        ok("--test が主要な項目を確認します")
+    else:
+        bad("--test に欠けている項目があります: %r" % missing)
+    # 結果行が出ること
+    if "Result:" in out:
+        ok("--test が結果を表示します")
+    else:
+        bad("--test に結果表示がありません")
+    # 全 OK なら 0、失敗があれば 1 を返す
+    if "FAILED" not in out:
+        ok("--test がすべて OK で終わります")
+    else:
+        bad("--test に失敗があります: " + out[-300:])
+
+    # ---- 6j. ソースがクラスごとに分割されている ----
+    expected = ["Program", "Config", "Json", "SessionStore", "ProxyHelper",
+                "LlmResp", "LlmCancelledException", "LlmClient", "ToolExecutor",
+                "SessionCtx", "Agent", "ConsoleUi", "Chat", "Diagnostics",
+                "Settings", "LineEditor", "MarkdownRenderer", "SelfTest"]
+    missing = [n for n in expected
+               if not os.path.exists(os.path.join(SRCDIR, n + ".cs"))]
+    if not missing:
+        ok("ソースがクラスごとに分割されています (%d ファイル)" % len(expected))
+    else:
+        bad("分割されていないクラスがあります: %r" % missing)
+    # 1 ファイル 1 クラスになっていること
+    multi = []
+    for n in expected:
+        fn = os.path.join(SRCDIR, n + ".cs")
+        if not os.path.exists(fn):
+            continue
+        body = open(fn, encoding="utf-8").read()
+        decls = [m for m in re.findall(r'^    (?:static )?class\s+(\w+)', body, re.M)]
+        if len(decls) != 1 or decls[0] != n:
+            multi.append("%s.cs -> %r" % (n, decls))
+    if not multi:
+        ok("各ファイルに 1 クラスだけが入っています")
+    else:
+        bad("複数クラスを含むファイルがあります: %r" % multi)
+    # 旧単一ファイルが残っていないこと
+    if not os.path.exists(os.path.join(HERE, "AgentConsole.cs")):
+        ok("旧 AgentConsole.cs は削除されています")
+    else:
+        bad("旧 AgentConsole.cs が残っています")
 
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、

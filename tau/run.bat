@@ -9,11 +9,11 @@ set "NEED_BUILD="
 if not exist "tau.exe" (
     set "NEED_BUILD=1"
 ) else (
-    for /f %%A in ('dir /b /o-d "AgentConsole.cs" "tau.exe" 2^>nul') do (
+    for /f %%A in ('dir /b /o-d "src\*.cs" "tau.exe" 2^>nul') do (
         if not defined FIRST (
             set "FIRST=%%A"
         ) else (
-            if /i "%%A"=="AgentConsole.cs" set "NEED_BUILD=1"
+            echo %%~xA| findstr /i ".cs" >nul && set "NEED_BUILD=1"
         )
     )
 )

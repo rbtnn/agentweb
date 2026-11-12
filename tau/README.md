@@ -2,7 +2,8 @@
 
 `tau` は **コンソール（ターミナル）だけで動く AI エージェント**です。
 同じリポジトリにある `agentweb`（Web UI 版）とは**独立した実装**で、コードの共通化はしていません
-（`agentweb` のソースを参考に、必要な部分を単一ファイルに書き起こしています）。
+（`agentweb` のソースを参考に、必要な部分を書き起こしています）。
+ソースは **クラスごとに 1 ファイル**に分割されています（`src/` 以下）。
 
 HTTP サーバも Web UI も持たず、標準入出力だけで対話します。
 `tau` が内部に持つメッセージ（ヘルプ・ツール定義・エラー表示など）は**英語**です。
@@ -25,7 +26,7 @@ tau.exe            … 直接起動
 Linux / macOS では `mono` の `mcs` でビルドできます。
 
 ```
-mcs -langversion:5 -out:tau.exe AgentConsole.cs
+mcs -langversion:5 -out:tau.exe src/*.cs
 mono tau.exe
 ```
 
@@ -725,11 +726,49 @@ python3 test_tau.py
 
 ```
 tau/
-  AgentConsole.cs   本体（単一ファイル・外部ライブラリ不要）
+  src/              ソース（クラスごとに 1 ファイル・外部ライブラリ不要）
+    Program.cs              エントリポイント・CLI 引数・コンソール設定
+    Config.cs               設定（tau.json）と環境変数
+    Json.cs                 JSON の解析・生成
+    SessionStore.cs         セッションの保存・読み込み・削除
+    ProxyHelper.cs          プロキシ設定
+    LlmResp.cs              LLM 応答の入れ物
+    LlmCancelledException.cs 中断を表す例外
+    LlmClient.cs            HTTP 通信（ストリーミング・再試行・TLS）
+    ToolExecutor.cs         ツール定義と実行
+    SessionCtx.cs           セッションの状態
+    Agent.cs                エージェント本体（ターン実行・要約）
+    ConsoleUi.cs            色付き出力の補助
+    Chat.cs                 対話ループ・コマンド処理
+    Diagnostics.cs          --diag 接続診断
+    Settings.cs             /config と /config edit
+    LineEditor.cs           入力（行編集・コンソールモード・クリップボード）
+    MarkdownRenderer.cs     Markdown の整形表示
+    SelfTest.cs             --test 自己診断テスト
   build.bat         ビルド（Windows / CP932・CRLF）
   run.bat           起動
   test_tau.py       実行時回帰テスト
+  diag_input.bat    入力まわりの診断
   README.md         このファイル
 ```
+
+### クラスの役割
+
+| クラス | 役割 |
+|---|---|
+| `Program` | エントリポイント、CLI 引数、コンソールのエンコーディングとバッファ設定 |
+| `Config` | `tau.json` と環境変数から設定を読み、未知のキーを保持して保存 |
+| `Json` | 外部ライブラリなしの JSON 解析・生成 |
+| `SessionStore` | `%APPDATA%\tau\sessions` への保存・読み込み・削除 |
+| `LlmClient` | HTTP 通信、SSE ストリーミング、TLS、再試行、キャンセル |
+| `ToolExecutor` | ツールの定義と実行（ファイル操作・シェルなど） |
+| `Agent` | 1 ターンの実行、ツール呼び出しのループ、文脈の圧縮 |
+| `Chat` | 対話ループ、コマンド（`/help` `/config` `/clear` など） |
+| `ConsoleUi` | 色付き・太字・淡色の出力 |
+| `LineEditor` | 入力の読み取り、コンソールの行編集モード、クリップボード |
+| `MarkdownRenderer` | 見出し・太字・表などを ANSI と罫線で整形 |
+| `Settings` | `/config` の表示と `/config edit` の対話編集 |
+| `Diagnostics` | `--diag` の接続診断 |
+| `SelfTest` | `--test` の自己診断テスト |
 
 `agentweb/`（`AgentWeb.cs` / `index.html` など）は**一切変更していません**。
