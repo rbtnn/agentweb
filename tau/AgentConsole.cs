@@ -55,8 +55,6 @@ namespace Tau
                 else if (a == "--debug") LlmClient.EnableDebug();
                 else if (a == "--diag") diag = true;
                 else if (a == "--version" || a == "-v") version = true;
-                else if (a == "--line-editor") LineEditor.SetForced(true);
-                else if (a == "--no-line-editor") LineEditor.SetForced(false);
             }
 
             if (version) { PrintVersion(); return; }
@@ -201,7 +199,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-14 progress+input";
+        public const string BuildStamp = "2026-02-15 readline-only";
 
         internal static void PrintVersion()
         {
@@ -228,8 +226,6 @@ namespace Tau
             Console.WriteLine("  --list             List saved sessions and exit");
             Console.WriteLine("  --diag             Run a connection diagnostic (TLS/HTTP) and exit");
             Console.WriteLine("  --debug            Enable debug output (same as TAU_DEBUG=1)");
-            Console.WriteLine("  --line-editor      Force the Emacs-style line editor on");
-            Console.WriteLine("  --no-line-editor   Force the Emacs-style line editor off");
             Console.WriteLine("  --help, -h, /?     Show this help");
             Console.WriteLine();
             Console.WriteLine("Commands available while chatting:");
@@ -3840,46 +3836,20 @@ namespace Tau
         // (例: 「あ」→ U+7E3A)。そのため自前の行編集は UTF-8 入力のときだけ使う。
         // Shift-JIS のときは従来どおり Console.ReadLine() に任せる。
         static bool enabled = false;
-        static bool forced = false;   // 明示的に指定されたか
 
+        // 自前の行編集はいったん無効にしている。
+        //
+        // Console.ReadKey() は Console.InputEncoding に従ってバイトを文字に
+        // 変換するため、コンソールの実際のコードページと合っていないと
+        // 日本語が壊れる(例: 「あ」→ U+7E3A)。さらに長い日本語を入力すると
+        // 途中で切れて送信されることがある。安定して動く Console.ReadLine()
+        // に任せるため、すべての入力経路でこちらを使う。
+        //
+        // 復活させる場合は Configure で enabled = true にする
+        // (切り替え用のフラグも戻す)。
         public static void Configure(Config cfg)
         {
-            if (forced) return;   // 明示指定を優先する
-
             enabled = false;
-            try
-            {
-                if (Console.IsInputRedirected) return;   // リダイレクト時は使わない
-            }
-            catch { return; }
-
-            // Windows のコンソールでは ReadKey による自前の行編集を既定で使わない。
-            // Console.InputEncoding を UTF-8 にしても実際のコンソール コードページが
-            // 932 のままだと ReadKey が文字を壊し、IME 併用時は入力が返らないことがある。
-            // 安定している Console.ReadLine() に任せ、使いたい人だけ
-            // --line-editor で明示的に有効にする。
-            int cp = 0;
-            try { cp = ConsoleInputCodePage(); } catch { }
-            if (cp != 0)
-            {
-                enabled = false;   // Windows のコンソール
-                return;
-            }
-
-            // Windows 以外(Unix 系)は、入力が UTF-8 のときだけ有効にする
-            try
-            {
-                Encoding e = Console.InputEncoding;
-                enabled = (e != null && e.CodePage == 65001);
-            }
-            catch { enabled = false; }
-        }
-
-        // 環境変数などで強制したい場合(--line-editor / --no-line-editor)
-        public static void SetForced(bool on)
-        {
-            forced = true;
-            enabled = on;
         }
 
         // Windows の実際のコンソール入力コードページ(GetConsoleCP)。

@@ -987,43 +987,32 @@ def main():
     else:
         bad("/clear の空セッション処理が想定と違います: " + out[-300:])
 
-    # ---- 6h. Emacs キーバインド(行編集) ----
-    if "class LineEditor" in tls_src:
-        ok("Emacs 風の行編集(LineEditor)が実装されています")
+    # ---- 6h. 行編集(Emacs キーバインド)はいったん無効 ----
+    # Console.ReadKey() による自前の行編集は、コンソールの実際の
+    # コードページと合っていないと日本語が壊れ、長い入力が途中で切れる。
+    # そのため Console.ReadLine() に任せる。
+    if "enabled = false;" in tls_src:
+        ok("自前の行編集は無効化されています")
     else:
-        bad("LineEditor がありません")
-    for key in ("Ctrl-H", "Ctrl-A", "Ctrl-E", "Ctrl-K", "Ctrl-U", "Ctrl-W",
-                "Ctrl-Y", "Ctrl-T", "Alt-B", "Alt-F"):
-        # キーは ConsoleKey 名で判定する
-        pass
-    # 対応キーの実装を確認
-    need = ["ConsoleKey.A", "ConsoleKey.E", "ConsoleKey.B", "ConsoleKey.F",
-            "ConsoleKey.K", "ConsoleKey.U", "ConsoleKey.W", "ConsoleKey.Y",
-            "ConsoleKey.T", "ConsoleKey.H"]
-    missing = [k for k in need if k not in tls_src]
-    if not missing:
-        ok("Ctrl-A/E/B/F/K/U/W/Y/T/H が実装されています")
+        bad("自前の行編集が有効なままです")
+    # 引数の解析部分に切り替えオプションが残っていないこと
+    if 'a == "--line-editor"' not in tls_src and 'a == "--no-line-editor"' not in tls_src:
+        ok("行編集の切り替えオプションは削除されています")
     else:
-        bad("未実装のキーがあります: %r" % missing)
-    if "WordStart" in tls_src and "WordEnd" in tls_src:
-        ok("Alt-B / Alt-F の単語移動が実装されています")
-    else:
-        bad("単語移動がありません")
-    # Shift-JIS では ReadKey が壊れるため、行編集は UTF-8 のときだけ有効
-    if "CodePage == 65001" in tls_src and "enabled" in tls_src:
-        ok("行編集は UTF-8 入力のときだけ有効になります")
-    else:
-        bad("エンコーディングによる行編集の切り替えがありません")
-    # リダイレクト時は従来の ReadLine にフォールバックする
+        bad("行編集の切り替えオプションが残っています")
     if "Console.ReadLine()" in tls_src:
-        ok("リダイレクト時は ReadLine にフォールバックします")
+        ok("入力は Console.ReadLine() で読み取ります")
     else:
-        bad("フォールバックがありません")
-    # 強制切り替えオプション
-    if "--line-editor" in tls_src and "--no-line-editor" in tls_src:
-        ok("--line-editor / --no-line-editor で切り替えられます")
+        bad("Console.ReadLine() が使われていません")
+    # 入力経路のどこでも ReadKey を使っていないこと(呼ばれないことを確認)
+    if "Console.ReadKey(true)" in tls_src:
+        # EditLoop には残っているが、interactive() が常に false なので到達しない
+        if "return enabled;" in tls_src and "enabled = false;" in tls_src:
+            ok("ReadKey 経路には到達しません(常に ReadLine)")
+        else:
+            bad("ReadKey 経路に到達する可能性があります")
     else:
-        bad("行編集の切り替えオプションがありません")
+        ok("ReadKey を使っていません")
 
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
