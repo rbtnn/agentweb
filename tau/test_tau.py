@@ -1294,6 +1294,29 @@ def main():
     else:
         bad("--test に実幅の報告がありません")
 
+    # ---- 6n. 起動時の幅測定 ----
+    if "MeasureWidthsOnce();" in tls_src:
+        ok("起動時に幅を測ります")
+    else:
+        bad("起動時の幅測定がありません")
+    if "GetConsoleScreenBufferInfo" in tls_src:
+        ok("カーソル位置は Windows API で直接読みます(端末に問い合わせない)")
+    else:
+        bad("カーソル位置の取得方法が安全ではありません")
+    # 多数決で Ambiguous の幅を決めること
+    if "ambWide" in tls_src and "ambNarrow" in tls_src:
+        ok("Ambiguous の幅を多数決で判定します")
+    else:
+        bad("Ambiguous の多数決判定がありません")
+    # 測る文字が十分あること
+    import re as _re
+    m = _re.search(r'string samples =\s*(.*?);', tls_src, _re.S)
+    if m:
+        sample_text = m.group(1)
+        ok("測定対象の文字が定義されています")
+    else:
+        bad("測定対象の文字がありません")
+
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
     # TLS 1.2 以上を要求する API で

@@ -425,20 +425,52 @@ namespace Tau
             // 計算上 2 桁でも 1 桁で描く端末があり、その場合は計算に合わせると
             // 罫線がずれる。
             MarkdownRenderer.MeasureWidthsOnce();
-            bool narrow = MarkdownRenderer.AmbiguousIsNarrow();
-            ConsoleUi.Dim("       terminal renders ambiguous-width as: "
-                + (narrow ? "1 column (half-width)" : "2 columns (full-width)") + "\n");
+            int measuredAmb = MarkdownRenderer.MeasuredAmbiguousWidth();
+            string ambText = (measuredAmb == 1) ? "1 column (half-width)"
+                           : (measuredAmb == 2) ? "2 columns (full-width)"
+                           : "unknown (using 2 columns)";
+            ConsoleUi.Dim("       terminal renders ambiguous-width as: " + ambText + "\n");
+            if (measuredAmb != 0)
+                Pass("ambiguous width was measured on this terminal ("
+                    + measuredAmb + " columns)");
+            else
+                Skip("cannot measure here (redirected or no console); "
+                    + "using 2 columns - set TAU_AMBIGUOUS_WIDTH=1 or 2 to force");
 
-            // 実際の描画で罫線が揃うかを確認する(見本)
+            // 個別の文字が実測値と一致しているか
+            string[] probe = new string[] { "①", "③", "⑩", "←", "★", "※", "℡", "Ⅰ" };
+            int mismatched = 0;
+            string firstMismatch = null;
+            for (int i = 0; i < probe.Length; i++)
+            {
+                int w = MarkdownRenderer.VisibleLength(probe[i]);
+                if (measuredAmb != 0 && w != measuredAmb)
+                {
+                    mismatched++;
+                    if (firstMismatch == null)
+                        firstMismatch = probe[i] + " width=" + w
+                            + " but terminal uses " + measuredAmb;
+                }
+            }
+            Check(mismatched == 0,
+                "ambiguous characters match the measured width",
+                mismatched > 0 ? firstMismatch : null);
+
+            // 実際の描画で罫線が揃うかを確認する(見本)。
+            // 余白は計算幅から求めるので、計算と実表示が食い違えば崩れる。
             ConsoleUi.Dim("       --- visual check: every | should line up ---\n");
-            Console.WriteLine("       +------+");
-            Console.WriteLine("       | あ   |");
-            Console.WriteLine("       | ①   |");
-            Console.WriteLine("       | ←   |");
-            Console.WriteLine("       | ★   |");
-            Console.WriteLine("       | A    |");
-            Console.WriteLine("       | ｱ    |");
-            Console.WriteLine("       +------+");
+            string[] boxRows = new string[] { "あ", "①", "←", "★", "A", "ｱ", "1" };
+            const int BOX_W = 8;
+            string top = "       +" + new string('-', BOX_W) + "+";
+            Console.WriteLine(top);
+            for (int i = 0; i < boxRows.Length; i++)
+            {
+                string s2 = boxRows[i];
+                int pad = BOX_W - 1 - MarkdownRenderer.VisibleLength(s2);
+                if (pad < 0) pad = 0;
+                Console.WriteLine("       | " + s2 + new string(' ', pad) + "|");
+            }
+            Console.WriteLine(top);
             ConsoleUi.Dim("       if a row sticks out, the width calculation is wrong\n");
 
             // 半角カナ・半角英数は 1 桁のまま

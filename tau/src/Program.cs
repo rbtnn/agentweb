@@ -168,6 +168,63 @@ namespace Tau
             return m;
         }
 
+        // ------------------------------------------------------------------
+        //  コンソールのカーソル桁位置を、端末に問い合わせずに取得する。
+        //  Console.CursorLeft は Mono / 一部端末で ESC[6n を送って応答待ちに
+        //  なるため、Windows では GetConsoleScreenBufferInfo を直接使う。
+        // ------------------------------------------------------------------
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct COORD
+        {
+            public short X;
+            public short Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct SMALL_RECT
+        {
+            public short Left;
+            public short Top;
+            public short Right;
+            public short Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct CONSOLE_SCREEN_BUFFER_INFO
+        {
+            public COORD dwSize;
+            public COORD dwCursorPosition;
+            public short wAttributes;
+            public SMALL_RECT srWindow;
+            public COORD dwMaximumWindowSize;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetConsoleScreenBufferInfo(IntPtr hConsoleOutput,
+            out CONSOLE_SCREEN_BUFFER_INFO lpConsoleScreenBufferInfo);
+
+        const int STD_OUTPUT_HANDLE = -11;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GetStdHandle(int nStdHandle);
+
+        // 現在のカーソル桁位置。取得できなければ -1。
+        internal static int GetConsoleCursorColumn()
+        {
+            if (!IsWindows()) return -1;
+            try
+            {
+                IntPtr h = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return -1;
+
+                CONSOLE_SCREEN_BUFFER_INFO info;
+                if (!GetConsoleScreenBufferInfo(h, out info)) return -1;
+                return info.dwCursorPosition.X;
+            }
+            catch { return -1; }
+        }
+
         internal static bool IsWindows()
         {
             try
@@ -298,7 +355,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-22 measure-width";
+        public const string BuildStamp = "2026-02-23 measure-ambiguous";
 
         internal static void PrintVersion()
         {

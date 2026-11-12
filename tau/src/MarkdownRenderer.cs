@@ -688,18 +688,25 @@ namespace Tau
         static Dictionary<int, int> measuredWidth = new Dictionary<int, int>();
         static bool measureAvailable = true;
         static bool measureDone = false;
+        // 実測した Ambiguous の幅(0 = 不明, 1 = 半角, 2 = 全角)
+        static int ambiguousMeasured = 0;
 
         // 端末で実際に測れるか(対話コンソールで、リダイレクトされていない)
         static bool CanMeasure()
         {
             if (!measureAvailable) return false;
+            // Windows のコンソールでのみ測れる。
+            // (他の環境ではカーソル位置を問い合わせずに取得できない)
+            if (!Program.IsWindows()) return false;
             try
             {
                 if (Console.IsOutputRedirected) return false;
                 if (Console.IsInputRedirected) return false;
             }
             catch { return false; }
-            return true;
+
+            // カーソル位置が取れるかを 1 度確認する
+            return (CursorColumn() >= 0);
         }
 
         // 起動時に 1 度だけ、代表的な文字の実表示幅を測って覚えておく。
@@ -710,26 +717,110 @@ namespace Tau
             measureDone = true;
             if (!CanMeasure()) { measureAvailable = false; return; }
 
-            // 代表的な文字を測る。同じ分類なら同じ幅になるはず。
-            string samples = "あ①←■★※℡ⅠAｱ";
+            // 測る文字の一覧。
+            //  - 基準となる全角(あ)と半角(A ｱ)
+            //  - Ambiguous の各ブロックから代表を複数(丸数字・矢印・図形・
+            //    星・記号・単位・ローマ数字・囲み文字)
+            // 1 文字だけ測ると、その文字が特別扱いされている場合に誤判定する。
+            string samples =
+                "あ"                       // 全角の基準(W)
+                + "Aｱ"                    // 半角の基準(Na / H)
+                + "①②③④⑤⑥⑦⑧⑨⑩"      // 丸数字 U+2460..
+                + "⑴⑵⑶"                  // 括弧付き数字 U+2474..
+                + "ⅠⅡⅢⅰⅱⅲ"              // ローマ数字 U+2160..
+                + "←→↑↓⇔⇒"              // 矢印 U+2190..
+                + "■□▲△▼▽◆◇○●◎"      // 図形 U+25A0..
+                + "★☆"                    // 星 U+2605..
+                + "※〒"                    // 記号 U+203B / U+3012
+                + "℡№"                    // U+2121 / U+2116
+                + "㈱㈲㈹"                 // 囲み文字 U+3231..
+                + "㌔㌘㍉㍑"               // 単位 U+3314..
+                + "㊤㊥㊦"                 // 囲み漢字 U+32A4..
+                + "〜"                     // 波ダッシュ U+301C(W)
+                + "－"                     // 全角ハイフン U+FF0D(F)
+                ;
+
+            int measured = 0;
+            int ambWide = 0;
+            int ambNarrow = 0;
+
             try
             {
                 for (int i = 0; i < samples.Length; i++)
                 {
                     char c = samples[i];
-                    int before = Console.CursorLeft;
-                    Console.Write(c);
-                    int after = Console.CursorLeft;
-                    Console.Write("\b \b");
+                    int w = MeasureOne(c);
+                    if (w <= 0) continue;
 
-                    int w = after - before;
-                    if (w >= 1 && w <= 2) measuredWidth[(int)c] = w;
+                    measuredWidth[(int)c] = w;
+                    measured++;
+
+                    if (IsAmbiguous(c))
+                    {
+                        if (w == 2) ambWide++;
+                        else if (w == 1) ambNarrow++;
+                    }
                 }
             }
             catch
             {
                 measureAvailable = false;
             }
+
+            // Ambiguous の実幅を多数決で決める。
+            // (ブロックによって描き方が違うフォントもある)
+            if (ambWide > ambNarrow) ambiguousMeasured = 2;
+            else if (ambNarrow > ambWide) ambiguousMeasured = 1;
+            else ambiguousMeasured = 0;   // 判定できない
+
+            if (Program.IsWindows() && LlmClient.DebugOn)
+            {
+                Console.Error.WriteLine("[width] measured=" + measured
+                    + " ambiguous wide=" + ambWide + " narrow=" + ambNarrow
+                    + " -> " + (ambiguousMeasured == 0 ? "unknown"
+                                : ambiguousMeasured.ToString()));
+            }
+        }
+
+        // 1 文字の実幅を測る。測れなければ 0。
+        //
+        // Console.CursorLeft は Mono や一部の端末で ESC[6n(カーソル位置問い合わせ)
+        // を送って応答待ちになるため使わない。Windows では
+        // GetConsoleScreenBufferInfo でカーソル位置を直接読む。
+        static int MeasureOne(char c)
+        {
+            try
+            {
+                int before = CursorColumn();
+                if (before < 0) return 0;
+
+                Console.Write(c);
+                int after = CursorColumn();
+                if (after < 0) return 0;
+
+                // 書いた文字を消してカーソルを元に戻す
+                Console.Write("\b \b");
+
+                int w = after - before;
+                if (w >= 1 && w <= 2) return w;
+                return 0;
+            }
+            catch { return 0; }
+        }
+
+        // 現在のカーソル桁位置。取得できなければ -1。
+        // 端末に問い合わせを送らず、Windows API で直接読む。
+        static int CursorColumn()
+        {
+            if (Program.IsWindows())
+            {
+                int col = Program.GetConsoleCursorColumn();
+                if (col >= 0) return col;
+            }
+
+            // Windows 以外: Console.CursorLeft は問い合わせを送ることがあるので
+            // 環境変数などで明示された場合のみ使う。
+            return -1;
         }
 
         // 環境変数で強制する(測れない環境向け)
@@ -758,21 +849,35 @@ namespace Tau
             ReadAmbiguousOverride();
             if (ambiguousOverride != 0) return (ambiguousOverride == 1);
 
-            int wide, amb;
-            if (!measuredWidth.TryGetValue('あ', out wide)) return false;
-            if (!measuredWidth.TryGetValue('①', out amb)) return false;
-            return (wide == 2 && amb == 1);
+            // 実測した多数決の結果を使う
+            if (ambiguousMeasured != 0) return (ambiguousMeasured == 1);
+
+            // 測れていない場合は計算値(全角)を使う
+            return false;
+        }
+
+        // 実測した Ambiguous の幅(0 = 不明, 1, 2)
+        public static int MeasuredAmbiguousWidth()
+        {
+            ReadAmbiguousOverride();
+            if (ambiguousOverride != 0) return ambiguousOverride;
+            return ambiguousMeasured;
         }
 
         // 測った幅があればそれを返す。なければ計算値。
         static int WidthOf(char c)
         {
+            // その文字を直接測っていればその値
             int w;
             if (measuredWidth.TryGetValue((int)c, out w)) return w;
 
-            // 測っていない文字は分類で判断する。
-            // 端末が Ambiguous を 1 桁で描くと分かっているなら 1 桁。
-            if (IsAmbiguous(c) && AmbiguousIsNarrow()) return 1;
+            // Ambiguous は実測した多数決に従う(個別に測っていない文字も)
+            if (IsAmbiguous(c))
+            {
+                int m = MeasuredAmbiguousWidth();
+                if (m != 0) return m;
+                return 2;   // 不明なら全角とみなす
+            }
 
             return IsWide(c) ? 2 : 1;
         }
