@@ -419,6 +419,56 @@ tau.exe
 - `[input] length=0` → 入力が空になっている(エンコーディング不一致)
 - `sending ...` の後で止まる → **通信の問題**
 
+### `tau --test`（自己診断テスト）
+
+`tau --test` は、環境・入力・設定・**LLM API への実際の HTTP リクエスト**まで
+まとめて確認します。失敗があれば終了コード 1 を返します。
+
+```
+tau.exe --test            … すべて確認（API へのリクエストを含む）
+tau.exe --test=offline    … ネットワークを使わずに確認（CI 向け）
+```
+
+| # | 項目 | 内容 |
+|---|---|---|
+| 1 | environment | OS / .NET / 入出力エンコーディング |
+| 2 | console modes | `ENABLE_LINE_INPUT`（Ctrl-V が効くか） |
+| 3 | encodings | 全角・半角・混在・丸数字の往復、NUL の有無 |
+| 4 | buffer limit | 254 文字の壁がないか（パイプ入力時は実際に 600 文字を読む） |
+| 5 | clipboard | 読み取りと往復 |
+| 6 | markdown | 表示幅（実測）・記号除去・罫線 |
+| 7 | Ctrl-C | ハンドラ登録 |
+| 8 | session store | 日本語を含む保存・読み込み・削除 |
+| 9 | config file | 未知キーの保持・`models` の除去 |
+| 10 | TLS | TLS 1.2 が適用されているか |
+| **11** | **LLM API** | **非ストリーミングとストリーミングの実リクエスト** |
+| 12 | interactive input | 実際に 1 行入力して何が届くか（任意） |
+
+#### 11. LLM API リクエスト
+
+`tau.json`（または環境変数）の設定で、実際に API を呼びます。
+
+```
+  11. LLM API request (real HTTP)
+       url   : https://.../v1/chat/completions
+       model : ...
+       key   : (set, 42 chars)
+  [OK] llmApiUrl is set
+  [1] non-streaming request (tools off)...
+  [OK] non-streaming request completed in 812 ms
+  [OK] the response contains text
+       reply : OK
+       tokens: 15
+  [2] streaming request (tools off)...
+  [OK] streaming request completed in 640 ms (3 chunks)
+  [OK] streaming delivered text incrementally
+```
+
+- 応答時間・トークン数・応答本文の先頭が表示されます
+- 接続できない場合は `[NG]` と理由（`ConnectFailure` など）が出ます
+- API キーは**長さだけ**表示し、内容は出しません
+- `llmApiUrl` が空の場合はスキップします（失敗扱いにしません）
+
 `diag_input.bat` をダブルクリックすると、バージョン・コードページ・
 環境変数・長い日本語入力のテストをまとめて実行できます。
 
@@ -736,6 +786,7 @@ python3 test_tau.py
 | 長い入力 | 長い日本語でも応答が返り、内容が欠けないか |
 | 行編集 | 自前の行編集が無効化され ReadLine を使うか |
 | 入力バッファ | 254 文字の上限を回避しているか |
+| LLM API | 実際に HTTP リクエストが通るか |
 | Ctrl-C | プロセスを終了せずターンだけ中止するか |
 | Ctrl-V | Windows の貼り付けが使えるか |
 | 長い混在入力 | 全角半角混在の長い入力が欠けないか |

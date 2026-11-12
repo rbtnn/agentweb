@@ -84,7 +84,7 @@ namespace Tau
 
         // -------------------------------------------------------------------
 
-        public static int Run(Config cfg)
+        public static int Run(Config cfg, bool online)
         {
             Console.WriteLine();
             ConsoleUi.Bold("tau --test  self test");
@@ -100,6 +100,8 @@ namespace Tau
             Sessions();
             ConfigFile(cfg);
             Tls(cfg);
+            if (online) ApiRequest(cfg);
+            else Skip("LLM API request skipped (--test=offline)");
             InteractiveInput();
 
             Console.WriteLine();
@@ -711,11 +713,155 @@ namespace Tau
             return cfg.ProxyUrl;
         }
 
-        // ---------------- 11. 対話入力(任意) ----------------
+        // ---------------- 11. LLM API への実リクエスト ----------------
+
+        static void ApiRequest(Config cfg)
+        {
+            Section("11. LLM API request (real HTTP)");
+
+            // 設定が揃っているか
+            string url = cfg.ApiBaseUrl;
+            ConsoleUi.Dim("       url   : " + (url == null ? "(none)" : url) + "\n");
+            ConsoleUi.Dim("       model : " + (cfg.Model == null ? "(none)" : cfg.Model) + "\n");
+            ConsoleUi.Dim("       key   : " + (string.IsNullOrEmpty(cfg.SecretKey)
+                ? "(not set)" : "(set, " + cfg.SecretKey.Length + " chars)") + "\n");
+
+            bool hasUrl = !string.IsNullOrEmpty(url);
+            Check(hasUrl, "llmApiUrl is set",
+                hasUrl ? null : "set it in tau.json or with /set llmApiUrl <url>");
+            if (!hasUrl)
+            {
+                Skip("skipping the request because there is no URL");
+                return;
+            }
+
+            bool hasKey = !string.IsNullOrEmpty(cfg.SecretKey);
+            if (!hasKey)
+                Skip("llmApiKey is not set (the server may still accept the request)");
+
+            // 送るメッセージ(ごく短く、決定的な応答を期待する)
+            List<object> messages = new List<object>();
+            messages.Add(Program.Msg("system",
+                "You are a connectivity test. Reply with exactly: OK"));
+            messages.Add(Program.Msg("user", "ping"));
+
+            // ---- 1. 非ストリーミング ----
+            ConsoleUi.Dim("  [1] non-streaming request (tools off)...\n");
+            DateTime t0 = DateTime.UtcNow;
+            LlmResp resp = null;
+            Exception err = null;
+            try
+            {
+                resp = LlmClient.CallOnce(cfg, messages, false);
+            }
+            catch (Exception ex)
+            {
+                err = ex;
+            }
+            TimeSpan elapsed = DateTime.UtcNow - t0;
+
+            if (err != null)
+            {
+                Fail("non-streaming request completed",
+                    DescribeError(err) + " (" + (int)elapsed.TotalMilliseconds + " ms)");
+                if (LlmClient.DebugOn)
+                    ConsoleUi.Dim("       chain: "
+                        + LlmClient.ExceptionChain(err).Replace("\n", "\n              ") + "\n");
+                // 失敗したらストリーミングは試さない
+                return;
+            }
+
+            Pass("non-streaming request completed in "
+                + (int)elapsed.TotalMilliseconds + " ms");
+
+            if (resp == null)
+            {
+                Fail("a response was parsed", "null response");
+                return;
+            }
+
+            // 応答の中身
+            bool hasContent = resp.Content != null && resp.Content.Length > 0;
+            Check(hasContent, "the response contains text",
+                hasContent ? null : "empty content");
+
+            if (hasContent)
+            {
+                string preview = resp.Content.Replace("\r", " ").Replace("\n", " ").Trim();
+                if (preview.Length > 60) preview = preview.Substring(0, 60) + "...";
+                ConsoleUi.Dim("       reply : " + preview + "\n");
+            }
+
+            if (resp.TotalTokens > 0)
+                ConsoleUi.Dim("       tokens: " + resp.TotalTokens + "\n");
+
+            // ---- 2. ストリーミング ----
+            ConsoleUi.Dim("  [2] streaming request (tools off)...\n");
+            StringBuilder streamed = new StringBuilder();
+            int chunks = 0;
+            DateTime t1 = DateTime.UtcNow;
+            LlmResp sresp = null;
+            Exception serr = null;
+            try
+            {
+                sresp = LlmClient.CallStream(cfg, messages, false,
+                    delegate (string d) { streamed.Append(d); chunks++; },
+                    delegate (string d) { });
+            }
+            catch (Exception ex)
+            {
+                serr = ex;
+            }
+            TimeSpan selapsed = DateTime.UtcNow - t1;
+
+            if (serr != null)
+            {
+                Fail("streaming request completed",
+                    DescribeError(serr) + " (" + (int)selapsed.TotalMilliseconds + " ms)");
+                return;
+            }
+
+            Pass("streaming request completed in "
+                + (int)selapsed.TotalMilliseconds + " ms (" + chunks + " chunks)");
+
+            bool gotStream = streamed.Length > 0;
+            Check(gotStream, "streaming delivered text incrementally",
+                gotStream ? null : "no content chunks received");
+
+            if (gotStream)
+            {
+                string preview = streamed.ToString().Replace("\r", " ").Replace("\n", " ").Trim();
+                if (preview.Length > 60) preview = preview.Substring(0, 60) + "...";
+                ConsoleUi.Dim("       reply : " + preview + "\n");
+            }
+
+            // 非ストリーミングとストリーミングで内容が一致するか。
+            // (サーバが同じ応答を返すとは限らないので、比較は緩めにする)
+            if (sresp != null && hasContent && gotStream
+                && sresp.Content != null && sresp.Content.Length > 0)
+            {
+                string a = resp.Content.Trim();
+                string b = sresp.Content.Trim();
+                Check(true, "both paths returned a response", null);
+                if (a != b)
+                    ConsoleUi.Dim("       (the two replies differ, which is normal"
+                        + " for non-deterministic models)\n");
+            }
+        }
+
+        // 例外を 1 行で説明する
+        static string DescribeError(Exception ex)
+        {
+            WebException wex = ex as WebException;
+            if (wex != null) return LlmClient.DescribeWebException(wex);
+            return ex.GetType().Name + ": " + ex.Message;
+        }
+
+        // ---------------- 12. 対話入力(任意) ----------------
 
         static void InteractiveInput()
         {
-            Section("11. interactive input (manual)");
+            Section("12. interactive input (manual)");
 
             if (!Program.IsWindows())
             {

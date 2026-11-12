@@ -136,6 +136,56 @@ class MockMarkdown(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+class MockSelfTestApi(BaseHTTPRequestHandler):
+    """--test の API リクエスト検証用(ストリーミングと非ストリーミング両対応)。"""
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n)
+        try:
+            d = json.loads(body.decode("utf-8"))
+        except Exception:
+            d = {}
+        stream = bool(d.get("stream", False))
+
+        if stream:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            for txt in ("OK",):
+                c = {"id": "c", "object": "chat.completion.chunk", "created": 1,
+                     "model": "test-model",
+                     "choices": [{"index": 0, "delta": {"content": txt},
+                                  "finish_reason": None}]}
+                self.wfile.write(("data: " + json.dumps(c) + "\n\n").encode())
+                self.wfile.flush()
+            c = {"id": "c", "object": "chat.completion.chunk", "created": 1,
+                 "model": "test-model",
+                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                 "usage": {"total_tokens": 12}}
+            self.wfile.write(("data: " + json.dumps(c) + "\n\n").encode())
+            self.wfile.flush()
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        else:
+            r = {"id": "c", "object": "chat.completion", "created": 1,
+                 "model": "test-model",
+                 "choices": [{"index": 0,
+                              "message": {"role": "assistant", "content": "OK"},
+                              "finish_reason": "stop"}],
+                 "usage": {"prompt_tokens": 8, "completion_tokens": 1,
+                           "total_tokens": 9}}
+            b = json.dumps(r).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(b)
+
+
 class MockHttpError(BaseHTTPRequestHandler):
     """HTTP エラー(401 など)を返すモック。"""
     protocol_version = "HTTP/1.1"
@@ -1188,7 +1238,7 @@ def main():
     else:
         bad("--help に --test がありません")
     # 実際に --test を実行する
-    out = run_tau("", args=["--test"])
+    out = run_tau("", args=["--test=offline"])
     if "tau --test  self test" in out:
         ok("--test が自己診断を実行します")
     else:
@@ -1269,14 +1319,14 @@ def main():
         ok("Ambiguous の判定を二分探索で行います")
     else:
         bad("Ambiguous の判定関数がありません")
-    out = run_tau("", args=["--test"])
+    out = run_tau("", args=["--test=offline"])
     if "ambiguous-width chars use the measured width" in out:
         ok("--test で Ambiguous 幅を実測値と比較します")
     else:
         bad("--test に Ambiguous 幅の確認がありません")
     # 1 桁端末と 2 桁端末の両方で通ること
     for forced in ("1", "2"):
-        o = run_tau("", args=["--test"],
+        o = run_tau("", args=["--test=offline"],
                     extra_env={"TAU_AMBIGUOUS_WIDTH": forced})
         if "ambiguous-width chars use the measured width (" + forced in o \
            and "FAILED" not in o:
@@ -1297,7 +1347,7 @@ def main():
         ok("TAU_AMBIGUOUS_WIDTH で幅を強制できます")
     else:
         bad("幅の強制指定がありません")
-    out = run_tau("", args=["--test"])
+    out = run_tau("", args=["--test=offline"])
     if "terminal renders ambiguous-width as" in out:
         ok("--test が端末の実幅を報告します")
     else:
@@ -1325,6 +1375,63 @@ def main():
         ok("測定対象の文字が定義されています")
     else:
         bad("測定対象の文字がありません")
+
+    # ---- 6o. --test の LLM API リクエスト ----
+    if "--test=offline" in tls_src:
+        ok("--test=offline でネットワークを省略できます")
+    else:
+        bad("--test=offline がありません")
+    # オフラインでは API を呼ばないこと
+    o = run_tau("", args=["--test=offline"])
+    if "LLM API request skipped" in o and "LLM API request (real HTTP)" not in o:
+        ok("--test=offline は API リクエストを行いません")
+    else:
+        bad("--test=offline が API を呼んでいます")
+
+    # 実際の API リクエスト(モックサーバー)を確認する
+    api_srv = HTTPServer(("127.0.0.1", 0), MockSelfTestApi)
+    api_port = api_srv.server_address[1]
+    threading.Thread(target=api_srv.serve_forever, daemon=True).start()
+    api_cfg = os.path.join(work, "api.json")
+    with open(api_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:%d/v1/chat/completions" % api_port,
+                   "llmApiKey": "test-key", "model": "test-model",
+                   "allowTools": False, "useSystemProxy": False}, f)
+    o = run_tau("", args=["--test", "--config", api_cfg], timeout=120)
+    api_srv.shutdown(); api_srv.server_close()
+
+    if "11. LLM API request (real HTTP)" in o:
+        ok("--test が LLM API リクエストを含みます")
+    else:
+        bad("--test に LLM API リクエストがありません")
+    if "non-streaming request completed" in o and "[NG] non-streaming" not in o:
+        ok("非ストリーミングのリクエストが成功します")
+    else:
+        bad("非ストリーミングのリクエストが失敗します: " + o[-500:])
+    if "streaming request completed" in o and "[NG] streaming" not in o:
+        ok("ストリーミングのリクエストが成功します")
+    else:
+        bad("ストリーミングのリクエストが失敗します: " + o[-500:])
+    if "the response contains text" in o:
+        ok("応答にテキストが含まれます")
+    else:
+        bad("応答にテキストがありません")
+
+    # 接続できないときは NG になり、終了コードが 1 になること
+    bad_cfg = os.path.join(work, "api-bad.json")
+    with open(bad_cfg, "w", encoding="utf-8") as f:
+        json.dump({"llmApiUrl": "http://127.0.0.1:1/v1/chat/completions",
+                   "llmApiKey": "k", "model": "m",
+                   "allowTools": False, "useSystemProxy": False}, f)
+    o = run_tau("", args=["--test", "--config", bad_cfg], timeout=120)
+    if "[NG] non-streaming request completed" in o:
+        ok("接続できないときは NG と表示します")
+    else:
+        bad("接続失敗が検出されていません")
+    if "Result:" in o and "FAILED" in o:
+        ok("接続できないときは結果に FAILED が付きます")
+    else:
+        bad("接続失敗が結果に反映されていません")
 
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、

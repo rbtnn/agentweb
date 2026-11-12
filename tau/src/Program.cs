@@ -43,6 +43,7 @@ namespace Tau
             bool diag = false;
             bool version = false;
             bool selfTest = false;
+            bool selfTestOffline = false;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -57,6 +58,8 @@ namespace Tau
                 else if (a == "--diag") diag = true;
                 else if (a == "--version" || a == "-v") version = true;
                 else if (a == "--test") selfTest = true;
+                else if (a == "--test=offline") { selfTest = true; selfTestOffline = true; }
+                else if (a == "--test-offline") { selfTest = true; selfTestOffline = true; }
             }
 
             if (version) { PrintVersion(); return; }
@@ -89,7 +92,7 @@ namespace Tau
 
             if (selfTest)
             {
-                int code = SelfTest.Run(cfg);
+                int code = SelfTest.Run(cfg, !selfTestOffline);
                 try { Console.Out.Flush(); } catch { }
                 Environment.ExitCode = code;
                 return;
@@ -355,7 +358,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-24 ambiguous-verify";
+        public const string BuildStamp = "2026-02-25 test-api";
 
         internal static void PrintVersion()
         {
@@ -381,7 +384,8 @@ namespace Tau
             Console.WriteLine("  --version          Show the build stamp and exit");
             Console.WriteLine("  --list             List saved sessions and exit");
             Console.WriteLine("  --diag             Run a connection diagnostic (TLS/HTTP) and exit");
-            Console.WriteLine("  --test             Run the built-in self test and exit");
+            Console.WriteLine("  --test             Run the built-in self test (includes an API request)");
+            Console.WriteLine("  --test=offline     Run the self test without any network request");
             Console.WriteLine("  --debug            Enable debug output (same as TAU_DEBUG=1)");
             Console.WriteLine("  --help, -h, /?     Show this help");
             Console.WriteLine();
