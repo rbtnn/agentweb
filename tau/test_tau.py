@@ -1275,6 +1275,25 @@ def main():
     else:
         bad("--test に Ambiguous 幅の確認がありません")
 
+    # ---- 6m. 端末の実幅を測る ----
+    if "MeasureWidthsOnce" in tls_src:
+        ok("端末の実表示幅を起動時に測ります")
+    else:
+        bad("実表示幅の測定がありません")
+    if "AmbiguousIsNarrow" in tls_src:
+        ok("Ambiguous が 1 桁かどうかを測定結果から判断します")
+    else:
+        bad("Ambiguous の実幅判定がありません")
+    if "TAU_AMBIGUOUS_WIDTH" in tls_src:
+        ok("TAU_AMBIGUOUS_WIDTH で幅を強制できます")
+    else:
+        bad("幅の強制指定がありません")
+    out = run_tau("", args=["--test"])
+    if "terminal renders ambiguous-width as" in out:
+        ok("--test が端末の実幅を報告します")
+    else:
+        bad("--test に実幅の報告がありません")
+
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
     # TLS 1.2 以上を要求する API で

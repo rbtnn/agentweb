@@ -602,7 +602,7 @@ namespace Tau
                     if (i < s.Length) i++;
                     continue;
                 }
-                n += IsWide(c) ? 2 : 1;
+                n += WidthOf(c);
                 i++;
             }
             return n;
@@ -677,6 +677,106 @@ namespace Tau
             return false;
         }
 
+        // ------------------------------------------------------------------
+        //  実際の端末での表示幅を測る
+        //
+        //  計算上 2 桁でも、フォントが 1 桁で描く端末もある(①②③ など)。
+        //  その場合は計算と実表示が食い違い、罫線がずれる。
+        //  文字を書いてカーソル位置を読み、実際に何桁進んだかを測る。
+        // ------------------------------------------------------------------
+
+        static Dictionary<int, int> measuredWidth = new Dictionary<int, int>();
+        static bool measureAvailable = true;
+        static bool measureDone = false;
+
+        // 端末で実際に測れるか(対話コンソールで、リダイレクトされていない)
+        static bool CanMeasure()
+        {
+            if (!measureAvailable) return false;
+            try
+            {
+                if (Console.IsOutputRedirected) return false;
+                if (Console.IsInputRedirected) return false;
+            }
+            catch { return false; }
+            return true;
+        }
+
+        // 起動時に 1 度だけ、代表的な文字の実表示幅を測って覚えておく。
+        // 描画のたびに測るとコンソールへの書き込みが増えるため。
+        public static void MeasureWidthsOnce()
+        {
+            if (measureDone) return;
+            measureDone = true;
+            if (!CanMeasure()) { measureAvailable = false; return; }
+
+            // 代表的な文字を測る。同じ分類なら同じ幅になるはず。
+            string samples = "あ①←■★※℡ⅠAｱ";
+            try
+            {
+                for (int i = 0; i < samples.Length; i++)
+                {
+                    char c = samples[i];
+                    int before = Console.CursorLeft;
+                    Console.Write(c);
+                    int after = Console.CursorLeft;
+                    Console.Write("\b \b");
+
+                    int w = after - before;
+                    if (w >= 1 && w <= 2) measuredWidth[(int)c] = w;
+                }
+            }
+            catch
+            {
+                measureAvailable = false;
+            }
+        }
+
+        // 環境変数で強制する(測れない環境向け)
+        //   TAU_AMBIGUOUS_WIDTH=1  … 1 桁(半角)として扱う
+        //   TAU_AMBIGUOUS_WIDTH=2  … 2 桁(全角)として扱う
+        static int ambiguousOverride = 0;
+
+        static void ReadAmbiguousOverride()
+        {
+            try
+            {
+                string v = Environment.GetEnvironmentVariable("TAU_AMBIGUOUS_WIDTH");
+                if (v != null)
+                {
+                    v = v.Trim();
+                    if (v == "1" || v == "2") ambiguousOverride = (v == "1") ? 1 : 2;
+                }
+            }
+            catch { }
+        }
+
+        // 測った結果から、Ambiguous の文字を全角とみなすか判断する。
+        // 「あ」が 2 桁で「①」が 1 桁なら、この端末では 1 桁で描く。
+        public static bool AmbiguousIsNarrow()
+        {
+            ReadAmbiguousOverride();
+            if (ambiguousOverride != 0) return (ambiguousOverride == 1);
+
+            int wide, amb;
+            if (!measuredWidth.TryGetValue('あ', out wide)) return false;
+            if (!measuredWidth.TryGetValue('①', out amb)) return false;
+            return (wide == 2 && amb == 1);
+        }
+
+        // 測った幅があればそれを返す。なければ計算値。
+        static int WidthOf(char c)
+        {
+            int w;
+            if (measuredWidth.TryGetValue((int)c, out w)) return w;
+
+            // 測っていない文字は分類で判断する。
+            // 端末が Ambiguous を 1 桁で描くと分かっているなら 1 桁。
+            if (IsAmbiguous(c) && AmbiguousIsNarrow()) return 1;
+
+            return IsWide(c) ? 2 : 1;
+        }
+
         // 全角(2 桁幅)かどうか。
         //
         // East Asian Width の W(全角)・F(半角相当の全角)に加えて、
@@ -710,6 +810,7 @@ namespace Tau
 
             return false;
         }
+
     }
 
     // =======================================================================

@@ -76,6 +76,10 @@ namespace Tau
             // Markdown の色付けを、コンソールの色対応に合わせる
             MarkdownRenderer.Configure(ConsoleUi.ColorEnabled);
 
+            // 端末が実際に何桁で描くかを、出力を始める前に測っておく。
+            // (①②③ などは計算上 2 桁でも 1 桁で描く端末がある)
+            MarkdownRenderer.MeasureWidthsOnce();
+
             // TLS 1.2 を最初に適用しておく。
             // .NET Framework の既定は Ssl3 | Tls のままで、現代のサーバでは
             // ほぼ必ず拒否される。要求のたびに設定するより先に固定しておく。
@@ -294,7 +298,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-21 wide-ambiguous";
+        public const string BuildStamp = "2026-02-22 measure-width";
 
         internal static void PrintVersion()
         {

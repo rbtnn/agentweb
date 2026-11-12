@@ -421,6 +421,26 @@ namespace Tau
                 "ambiguous-width chars count as 2 columns (①②③ ←→ ■□ ★☆ etc.)",
                 badAmbiguous > 0 ? badAmbiguous + " wrong, first: " + firstBad : null);
 
+            // 実際の端末が何桁で描くかを測って報告する。
+            // 計算上 2 桁でも 1 桁で描く端末があり、その場合は計算に合わせると
+            // 罫線がずれる。
+            MarkdownRenderer.MeasureWidthsOnce();
+            bool narrow = MarkdownRenderer.AmbiguousIsNarrow();
+            ConsoleUi.Dim("       terminal renders ambiguous-width as: "
+                + (narrow ? "1 column (half-width)" : "2 columns (full-width)") + "\n");
+
+            // 実際の描画で罫線が揃うかを確認する(見本)
+            ConsoleUi.Dim("       --- visual check: every | should line up ---\n");
+            Console.WriteLine("       +------+");
+            Console.WriteLine("       | あ   |");
+            Console.WriteLine("       | ①   |");
+            Console.WriteLine("       | ←   |");
+            Console.WriteLine("       | ★   |");
+            Console.WriteLine("       | A    |");
+            Console.WriteLine("       | ｱ    |");
+            Console.WriteLine("       +------+");
+            ConsoleUi.Dim("       if a row sticks out, the width calculation is wrong\n");
+
             // 半角カナ・半角英数は 1 桁のまま
             Check(MarkdownRenderer.VisibleLength("ｱ") == 1,
                 "half-width katakana counts as 1 column", null);
