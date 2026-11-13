@@ -717,6 +717,10 @@ namespace Tau
             measureDone = true;
             if (!CanMeasure()) { measureAvailable = false; return; }
 
+            // 測定前のカーソル位置を覚えておき、最後に戻す
+            int saveCol, saveRow, winW, winH;
+            bool havePos = GetCursorAndSize(out saveCol, out saveRow, out winW, out winH);
+
             // 測る文字の一覧。
             //  - 基準となる全角(あ)と半角(A ｱ)
             //  - Ambiguous の各ブロックから代表を複数(丸数字・矢印・図形・
@@ -767,11 +771,33 @@ namespace Tau
                 measureAvailable = false;
             }
 
+            // 測定の健全性チェック。
+            // 「あ」が 2 桁、「A」が 1 桁でなければ、測定自体が壊れている。
+            int wA, wAscii;
+            bool sane = true;
+            if (measuredWidth.TryGetValue('あ', out wA) && wA != 2) sane = false;
+            if (measuredWidth.TryGetValue('A', out wAscii) && wAscii != 1) sane = false;
+
+            if (!sane)
+            {
+                // 測定が信用できないので、すべて捨てて計算値に戻す
+                measuredWidth.Clear();
+                ambiguousMeasured = 0;
+                measureAvailable = false;
+                return;
+            }
+
             // Ambiguous の実幅を多数決で決める。
             // (ブロックによって描き方が違うフォントもある)
             if (ambWide > ambNarrow) ambiguousMeasured = 2;
             else if (ambNarrow > ambWide) ambiguousMeasured = 1;
             else ambiguousMeasured = 0;   // 判定できない
+
+            // カーソルを元の位置に戻す
+            if (havePos && saveRow >= 0 && saveCol >= 0)
+            {
+                try { MoveTo(saveCol, saveRow); } catch { }
+            }
 
             if (Program.IsWindows() && LlmClient.DebugOn)
             {
@@ -791,21 +817,56 @@ namespace Tau
         {
             try
             {
-                int before = CursorColumn();
+                // 画面の最終行や右端で測ると折り返し・スクロールで誤る。
+                // 1 行目の先頭にカーソルを移してから測る。
+                int col, row, width, height;
+                if (!GetCursorAndSize(out col, out row, out width, out height)) return 0;
+
+                // 画面が狭すぎる場合は測らない
+                if (width < 8 || height < 4) return 0;
+
+                // Console.Out はバッファされるため、先にフラッシュしないと
+                // カーソル位置がまだ更新されていない。
+                try { Console.Out.Flush(); } catch { }
+
+                int before = MoveTo(0, 0);
                 if (before < 0) return 0;
 
-                Console.Write(c);
+                // Console.Write ではなく、バッファを通さず直接書く
+                Program.WriteConsoleChar(c);
+
                 int after = CursorColumn();
                 if (after < 0) return 0;
 
-                // 書いた文字を消してカーソルを元に戻す
-                Console.Write("\b \b");
+                // 書いた文字を消す(空白で上書きしてから先頭へ戻す)
+                int clearW = (after - before > 0) ? (after - before) : 1;
+                Program.FillConsoleAt(0, 0, clearW);
 
                 int w = after - before;
                 if (w >= 1 && w <= 2) return w;
                 return 0;
             }
             catch { return 0; }
+        }
+
+        // カーソルを指定位置へ移し、その桁位置を返す。失敗したら -1。
+        // SetCursorPosition は ESC[6n を送る端末があるため、Windows API を使う。
+        static int MoveTo(int x, int y)
+        {
+            if (Program.IsWindows())
+            {
+                int col = Program.SetConsoleCursorPosition(x, y);
+                if (col >= 0) return col;
+            }
+            return -1;
+        }
+
+        // カーソル位置と画面サイズを取得する
+        static bool GetCursorAndSize(out int col, out int row, out int width, out int height)
+        {
+            col = -1; row = -1; width = 0; height = 0;
+            if (!Program.IsWindows()) return false;
+            return Program.GetConsoleCursorAndSize(out col, out row, out width, out height);
         }
 
         // 現在のカーソル桁位置。取得できなければ -1。
@@ -854,6 +915,14 @@ namespace Tau
 
             // 測れていない場合は計算値(全角)を使う
             return false;
+        }
+
+        // 個別に測った文字の幅(テスト表示用)。測っていなければ 0。
+        public static int MeasuredWidthOf(char c)
+        {
+            int w;
+            if (measuredWidth.TryGetValue((int)c, out w)) return w;
+            return 0;
         }
 
         // 実測した Ambiguous の幅(0 = 不明, 1, 2)

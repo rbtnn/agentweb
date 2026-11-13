@@ -415,6 +415,23 @@ namespace Tau
                            : (expectedAmb == 2) ? "2 columns (full-width)"
                            : "unknown (using 2 columns)";
             ConsoleUi.Dim("       terminal renders ambiguous-width as: " + ambText + "\n");
+
+            // 個別に測った文字の幅を出す(端末ごとの違いが分かる)
+            string[] measuredProbe = new string[]
+            {
+                "あ", "A", "ｱ", "①", "③", "⑩", "←", "→", "★", "☆", "※", "℡", "Ⅰ",
+            };
+            StringBuilder line = new StringBuilder();
+            for (int i = 0; i < measuredProbe.Length; i++)
+            {
+                string ch = measuredProbe[i];
+                int mw = MarkdownRenderer.MeasuredWidthOf(ch[0]);
+                line.Append(ch).Append("=");
+                if (mw == 0) line.Append("?");
+                else line.Append(mw);
+                line.Append(' ');
+            }
+            ConsoleUi.Dim("       measured: " + line + "\n");
             if (expectedAmb != 0)
                 Pass("ambiguous width was measured on this terminal ("
                     + expectedAmb + " columns)");
@@ -460,6 +477,17 @@ namespace Tau
             }
             Console.WriteLine(top);
             ConsoleUi.Dim("       if a row sticks out, the width calculation is wrong\n");
+
+            // 実測の健全性: 「あ」が 2、「A」が 1 でなければ測定が壊れている
+            if (expectedAmb != 0 && MarkdownRenderer.MeasuredWidthOf('あ') != 0)
+            {
+                int wa = MarkdownRenderer.MeasuredWidthOf('あ');
+                int wa2 = MarkdownRenderer.MeasuredWidthOf('A');
+                Check(wa == 2 && wa2 == 1,
+                    "measurement is consistent (あ=2, A=1)",
+                    (wa == 2 && wa2 == 1) ? null
+                        : ("あ=" + wa + " A=" + wa2 + " - measurement looks broken"));
+            }
 
             // 半角カナ・半角英数は 1 桁のまま
             Check(MarkdownRenderer.VisibleLength("ｱ") == 1,

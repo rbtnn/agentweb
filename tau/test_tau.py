@@ -1433,6 +1433,54 @@ def main():
     else:
         bad("接続失敗が結果に反映されていません")
 
+    # ---- 6p. 端末ごとの幅の違いへの対応 ----
+    if "GetConsoleCursorAndSize" in tls_src:
+        ok("画面サイズとカーソル位置を取得できます")
+    else:
+        bad("画面サイズの取得がありません")
+    if "SetConsoleCursorPosition" in tls_src:
+        ok("測定前にカーソルを移動します(折り返し・スクロール回避)")
+    else:
+        bad("カーソル移動がありません")
+    if "MeasuredWidthOf" in tls_src:
+        ok("文字ごとの実測幅を取得できます")
+    else:
+        bad("文字ごとの実測幅がありません")
+    # 測定前後でカーソルを保存・復元すること
+    if "havePos" in tls_src:
+        ok("測定後にカーソル位置を復元します")
+    else:
+        bad("カーソル位置の復元がありません")
+    o = run_tau("", args=["--test=offline"])
+    if "measured:" in o:
+        ok("--test が文字ごとの実測幅を表示します")
+    else:
+        bad("--test に実測幅の表示がありません")
+
+    # ---- 6q. 測定の健全性 ----
+    if "WriteConsoleChar" in tls_src:
+        ok("測定時はバッファを通さず直接書きます")
+    else:
+        bad("測定時の書き込みがバッファ経由です")
+    if "FillConsoleAt" in tls_src:
+        ok("測定した文字を確実に消します")
+    else:
+        bad("測定後の後始末がありません")
+    if "Console.Out.Flush()" in tls_src:
+        ok("測定前に出力をフラッシュします")
+    else:
+        bad("測定前のフラッシュがありません")
+    # 測定が壊れていたら捨てて計算値に戻すこと
+    if "measuredWidth.Clear()" in tls_src:
+        ok("測定が壊れている場合は捨てて計算値に戻します")
+    else:
+        bad("測定結果の健全性チェックがありません")
+    # 健全性チェックは測れた環境でのみ実行される(リダイレクト時は出ない)
+    if "measurement is consistent" in tls_src:
+        ok("--test が測定の健全性を確認します(測れた環境のみ)")
+    else:
+        bad("--test に健全性チェックがありません")
+
     # ---- 7. TLS 設定 ----
     # .NET Framework 4.7 未満では既定が TLS 1.0 相当になり、
     # TLS 1.2 以上を要求する API で

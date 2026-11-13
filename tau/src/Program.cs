@@ -212,6 +212,93 @@ namespace Tau
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GetStdHandle(int nStdHandle);
 
+        [DllImport("kernel32.dll", EntryPoint = "SetConsoleCursorPosition",
+            SetLastError = true)]
+        static extern bool SetConsoleCursorPos(IntPtr hConsoleOutput, COORD dwCursorPosition);
+
+        [DllImport("kernel32.dll",
+            CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool WriteConsoleW(IntPtr hConsoleOutput, string lpBuffer,
+            uint nNumberOfCharsToWrite, out uint lpNumberOfCharsWritten, IntPtr lpReserved);
+
+        // コンソールに 1 文字を直接書く(Console.Out のバッファを通さない)。
+        internal static bool WriteConsoleChar(char c)
+        {
+            if (!IsWindows()) return false;
+            try
+            {
+                IntPtr h = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return false;
+                uint written;
+                return WriteConsoleW(h, c.ToString(), 1, out written, IntPtr.Zero);
+            }
+            catch { return false; }
+        }
+
+        // 指定位置から空白で上書きする(測定した文字を消すため)。
+        internal static bool FillConsoleAt(int x, int y, int count)
+        {
+            if (!IsWindows() || count <= 0) return false;
+            try
+            {
+                IntPtr h = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return false;
+
+                if (!SetConsoleCursorPos(h, MakeCoord(x, y))) return false;
+                uint written;
+                return WriteConsoleW(h, new string(' ', count), (uint)count,
+                    out written, IntPtr.Zero);
+            }
+            catch { return false; }
+        }
+
+        static COORD MakeCoord(int x, int y)
+        {
+            COORD c;
+            c.X = (short)x;
+            c.Y = (short)y;
+            return c;
+        }
+
+        // カーソルを移動し、移動後の桁位置を返す。失敗したら -1。
+        internal static int SetConsoleCursorPosition(int x, int y)
+        {
+            if (!IsWindows()) return -1;
+            try
+            {
+                IntPtr h = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return -1;
+
+                if (!SetConsoleCursorPos(h, MakeCoord(x, y))) return -1;
+                return x;
+            }
+            catch { return -1; }
+        }
+
+        // カーソル位置と画面サイズを取得する。
+        internal static bool GetConsoleCursorAndSize(out int col, out int row,
+                                                    out int width, out int height)
+        {
+            col = -1; row = -1; width = 0; height = 0;
+            if (!IsWindows()) return false;
+            try
+            {
+                IntPtr h = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return false;
+
+                CONSOLE_SCREEN_BUFFER_INFO info;
+                if (!GetConsoleScreenBufferInfo(h, out info)) return false;
+
+                col = info.dwCursorPosition.X;
+                row = info.dwCursorPosition.Y;
+                // ウィンドウ内の桁数・行数(バッファ全体ではなく表示領域)
+                width = info.srWindow.Right - info.srWindow.Left + 1;
+                height = info.srWindow.Bottom - info.srWindow.Top + 1;
+                return true;
+            }
+            catch { return false; }
+        }
+
         // 現在のカーソル桁位置。取得できなければ -1。
         internal static int GetConsoleCursorColumn()
         {
@@ -358,7 +445,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-25 test-api";
+        public const string BuildStamp = "2026-02-26 measure-fix";
 
         internal static void PrintVersion()
         {
