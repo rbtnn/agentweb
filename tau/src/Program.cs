@@ -445,7 +445,7 @@ namespace Tau
         }
 
         // ビルド識別子。古い tau.exe を動かしていないか確認できるようにする。
-        public const string BuildStamp = "2026-02-26 measure-fix";
+        public const string BuildStamp = "2026-02-27 test-hooks";
 
         internal static void PrintVersion()
         {

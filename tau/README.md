@@ -369,6 +369,37 @@ set TAU_AMBIGUOUS_WIDTH=2   … ①②③ を全角(2桁)として扱う
 `tau --test` の「6. Markdown renderer」で、実際の端末が何桁で描いているかと、
 罫線が揃っているかの見本が表示されます。
 
+**同じプログラムでも、環境によって幅は変わります。**
+
+| 環境 | コードページ | `①②③` の幅 | tau の測定結果 |
+|---|---|---|---|
+| 英語ロケールの Windows | 437 | 1 桁 | `1 column` |
+| 日本語 Windows（フォント次第） | 932 | 1 桁 or 2 桁 | 実測に従う |
+
+#### 無人実行・画面キャプチャできない環境での確認
+
+```
+set TAU_TEST_NO_INPUT=1            … 対話入力の確認を省く
+set TAU_TEST_WIDTH_FILE=C:\width.txt … 測定結果をファイルに書き出す
+```
+
+`TAU_TEST_WIDTH_FILE` の中身:
+
+```
+ambiguous=1
+あ=2
+A=1
+ｱ=1
+①=1
+③=1
+⑩=1
+←=1
+...
+```
+
+`ambiguous=` が端末の実測値、それ以降が文字ごとの幅です。
+**別の PC と比較すれば、どちらが正しいか判断できます。**
+
 ```
        terminal renders ambiguous-width as: 1 column (half-width)
        --- visual check: every | should line up ---

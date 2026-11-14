@@ -102,7 +102,17 @@ namespace Tau
             Tls(cfg);
             if (online) ApiRequest(cfg);
             else Skip("LLM API request skipped (--test=offline)");
-            InteractiveInput();
+            // TAU_TEST_NO_INPUT=1 なら対話入力の確認を省く
+            // (無人実行や、出力をリダイレクトして確認するとき用)
+            bool skipInput = false;
+            try
+            {
+                string v = System.Environment.GetEnvironmentVariable("TAU_TEST_NO_INPUT");
+                skipInput = (v != null && v.Trim().Length > 0 && v.Trim() != "0");
+            }
+            catch { }
+            if (skipInput) Skip("interactive input skipped (TAU_TEST_NO_INPUT=1)");
+            else InteractiveInput();
 
             Console.WriteLine();
             if (failed == 0)
@@ -415,6 +425,27 @@ namespace Tau
                            : (expectedAmb == 2) ? "2 columns (full-width)"
                            : "unknown (using 2 columns)";
             ConsoleUi.Dim("       terminal renders ambiguous-width as: " + ambText + "\n");
+
+            // TAU_TEST_WIDTH_FILE が指定されていれば、測定結果を書き出す
+            // (画面をキャプチャできない環境での確認用)
+            try
+            {
+                string wf = System.Environment.GetEnvironmentVariable("TAU_TEST_WIDTH_FILE");
+                if (wf != null && wf.Trim().Length > 0)
+                {
+                    StringBuilder rep2 = new StringBuilder();
+                    rep2.Append("ambiguous=").Append(expectedAmb).Append('\n');
+                    string probeAll = "あAｱ①③⑩←→★☆※℡Ⅰ";
+                    for (int i = 0; i < probeAll.Length; i++)
+                    {
+                        char pc = probeAll[i];
+                        rep2.Append(pc).Append('=')
+                            .Append(MarkdownRenderer.MeasuredWidthOf(pc)).Append('\n');
+                    }
+                    File.WriteAllText(wf, rep2.ToString(), Encoding.UTF8);
+                }
+            }
+            catch { }
 
             // 個別に測った文字の幅を出す(端末ごとの違いが分かる)
             string[] measuredProbe = new string[]
